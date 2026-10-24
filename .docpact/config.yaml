@@ -1,13 +1,19 @@
 version: 1
 layout: repo
-lastReviewedAt: "2026-09-19"
-lastReviewedCommit: "07f65ef100300d7cb44996476af8a033a9ae8bbc"
+lastReviewedAt: "2026-10-24"
+lastReviewedCommit: "c4d0aa3a28836d0a5425ec1c538ff295d3aa6c67"
 
 repo:
   id: unstructure
 
 routing:
   intents:
+    sci-document-work:
+      paths:
+        - SCI_DOCUMENT_WORKLOG.md
+        - src/journals/**
+        - _docs/runbooks/sci-local-server.md
+        - _docs/reference/sci-evidence-index.md
     governance:
       paths:
         - AGENTS.md
@@ -29,6 +35,8 @@ routing:
 
 coverage:
   include:
+    - .gitignore
+    - SCI_DOCUMENT_WORKLOG.md
     - AGENTS.md
     - README.md
     - .docpact/**
@@ -59,6 +67,7 @@ coverage:
 
 docInventory:
   include:
+    - SCI_DOCUMENT_WORKLOG.md
     - AGENTS.md
     - README.md
     - .docpact/config.yaml
@@ -83,10 +92,30 @@ freshness:
   critical_after_days: 180
 
 rules:
+  - id: unstructure-sci-worklog
+    scope: module
+    repo: unstructure
+    triggers:
+      - path: src/journals/**
+        kind: sci-processing-source
+      - path: SCI_DOCUMENT_WORKLOG.md
+        kind: sci-work-diary
+      - path: _docs/runbooks/sci-local-server.md
+        kind: sci-execution-handoff
+    requiredDocs:
+      - path: SCI_DOCUMENT_WORKLOG.md
+        mode: body_update_required
+      - path: _docs/runbooks/sci-local-server.md
+        mode: must_exist
+      - path: _docs/reference/sci-evidence-index.md
+        mode: must_exist
+    reason: SCI changes must record issue scope, actual execution evidence and remaining data repair work in the diary.
   - id: unstructure-governance
     scope: repo
     repo: unstructure
     triggers:
+      - path: .gitignore
+        kind: evidence-publication-boundary
       - path: AGENTS.md
         kind: agent-contract
       - path: .docpact/config.yaml

@@ -12,8 +12,8 @@ checkPaths:
   - .docpact/config.yaml
   - .github/workflows/docpact.yml
   - _docs/**
-lastReviewedAt: 2026-09-19
-lastReviewedCommit: 07f65ef100300d7cb44996476af8a033a9ae8bbc
+lastReviewedAt: 2026-10-24
+lastReviewedCommit: c4d0aa3a28836d0a5425ec1c538ff295d3aa6c67
 ---
 
 # Unstructure Documentation
@@ -31,6 +31,9 @@ This directory contains the repo-local source documents governed by docpact.
 
 ## Current Documents
 
+- [SCI 工作日记](../SCI_DOCUMENT_WORKLOG.md): SCI 问题台账、历史基线、当前焦点与修改记录；后续 SCI 工作先读此处。
+- [历史证据索引](reference/sci-evidence-index.md): 本地保留范围、远端历史定位、未批准提案与提交边界。
+- [本机与 141 操作说明](runbooks/sci-local-server.md): 两端路径、NAS 别名、证据位置与交接规则。
 - `_docs/contracts/repo-contract.md`: repository ownership, boundaries, and
   completion rules.
 - `_docs/architecture/repo-architecture.md`: document processing topology.
