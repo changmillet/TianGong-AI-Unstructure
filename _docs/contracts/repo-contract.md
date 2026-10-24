@@ -13,8 +13,8 @@ checkPaths:
   - .docpact/config.yaml
   - src/**
   - requirements.txt
-lastReviewedAt: 2026-09-19
-lastReviewedCommit: 07f65ef100300d7cb44996476af8a033a9ae8bbc
+lastReviewedAt: 2026-10-24
+lastReviewedCommit: c4d0aa3a28836d0a5425ec1c538ff295d3aa6c67
 ---
 
 # Unstructure Repository Contract
@@ -34,7 +34,8 @@ flows.
 - Root workspace governance, branch policy, and submodule integration remain in
   the workspace repository.
 - Large input documents, processed outputs, and job logs are operational data,
-  not source documentation.
+  not source documentation. Historical `analysis/` evidence remains outside Git;
+  see the [evidence index](../reference/sci-evidence-index.md) for scope and retention.
 
 ## Processing Surface
 

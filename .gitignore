@@ -181,3 +181,7 @@ processed_docs
 *.csv
 logs/
 *.txt
+
+# Local historical evidence: raw responses, inventories, scripts and draft designs.
+# Tracked navigation and retention rules: _docs/reference/sci-evidence-index.md
+/analysis/
