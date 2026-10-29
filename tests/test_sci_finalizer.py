@@ -1,0 +1,171 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import psycopg2
+
+from src.kb_parse_worker import sci_finalizer as receiver
+from src.kb_parse_worker.sci_artifacts import PIPELINE, digest, promote, publish, verify_run
+from src.kb_parse_worker.parser_adapter import ParsedDocument
+from src.kb_parse_worker.worker import ParseFinalizerWorker
+from tests.test_kb_parse_worker_artifacts import snapshot
+from tests.test_kb_parse_worker_reliability import NoopLease, worker_config
+
+DOC = '2e03c71a-0429-4706-990e-44af753d2c1b'
+JOB = '38a40cb8-e19a-43bf-9f15-8ed4fc0bf066'
+
+
+class ReceiverTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.config = worker_config()
+        self.config.nas_raw_root = self.root
+        self.config.unstructure_serve_two_stage_base_url = 'http://parser'
+        self.config.unstructure_serve_bearer_token = 'test'
+        self.config.two_stage_status_timeout_seconds = 30
+        self.config.parser_profile = 'test'
+        self.config.parser_version = 'test'
+        self.meta = {'pipeline': PIPELINE, 'source_table': 'journals', 'journal_id': DOC}
+        self.payload = {'pipeline': PIPELINE, 'source_sha256': snapshot().sha256,
+                        'two_stage': {'task_id': 'celery-1'}}
+        self.snapshot = replace(snapshot(), job_id=JOB, document_id=DOC,
+                                document_metadata_json=self.meta, job_payload_json=self.payload)
+        self.claim = SimpleNamespace(job_id=JOB, document_id=DOC, document_version=1, task_id='celery-1')
+        self.parsed = ParsedDocument([{'text': 'first page', 'page_number': 1}], 'first page', 1, 0)
+        self.staged = publish(self.root / 'stage', DOC, JOB, self.snapshot.sha256,
+                              self.parsed, {}, document_version=1)
+        self.destination = self.root / 'processed' / 'sci' / DOC
+        self.row = dict(document_id=DOC,job_version=1,document_version=1,stage='parse',
+                        status='running',locked_by=self.config.worker_id,lease_valid=True,
+                        payload_json=self.payload,metadata_json=self.meta,sha256=self.snapshot.sha256,
+                        deleted_at=None,document_status="parsing",processed_manifest_local_uri=None,processed_manifest_hash=None)
+
+    def connection(self, row=None, journal=True, update=True):
+        conn = MagicMock()
+        cur = conn.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = [row or self.row, {'id':DOC} if journal else None,
+                                    {'id':JOB} if update else None]
+        return conn, cur
+
+    def test_guarded_receipt_has_no_sci_write_or_queue_handoff(self):
+        conn, cur = self.connection()
+        receiver.receive(conn,self.config,self.claim,self.snapshot,self.staged)
+        verify_run(self.destination,DOC,JOB,self.snapshot.sha256)
+        sql = ' '.join(call.args[0] for call in cur.execute.call_args_list).lower()
+        self.assertIn("status='parsed_local'",sql)
+        self.assertIn('for update of j,d',sql)
+        for forbidden in ['update public.journals','pgmq.','embedding_time','fulltext_time','chunk_count=']:
+            self.assertNotIn(forbidden,sql)
+
+    def test_stale_claim_never_publishes(self):
+        for changed in [dict(job_version=2),dict(document_version=2),dict(locked_by='other'),
+                        dict(lease_valid=False),dict(deleted_at='deleted'),dict(sha256='changed'),
+                        dict(payload_json={'pipeline':PIPELINE,'two_stage':{'task_id':'new-task'}})]:
+            row = {**self.row, **changed}
+            conn,_ = self.connection(row)
+            with self.assertRaises(receiver.SCILeaseLost):
+                receiver.receive(conn,self.config,self.claim,self.snapshot,self.staged)
+            self.assertFalse(self.destination.exists())
+
+    def test_missing_journal_and_missing_contract_never_publish(self):
+        conn,_ = self.connection(journal=False)
+        with self.assertRaises(receiver.SCIContractError):
+            receiver.receive(conn,self.config,self.claim,self.snapshot,self.staged)
+        for bad in [{}, {'source_table':'journals'}, {**self.meta,'journal_id':JOB}]:
+            with self.assertRaises(receiver.SCIContractError):
+                receiver.validate_contract(replace(self.snapshot,document_metadata_json=bad))
+        with self.assertRaises(receiver.SCIContractError):
+            receiver.validate_contract(replace(self.snapshot,job_payload_json={**self.payload,'source_sha256':'other'}))
+        self.assertFalse(self.destination.exists())
+
+    def test_receipt_replay_is_idempotent_and_rejects_mismatch(self):
+        promote(self.staged,self.destination)
+        row = {**self.row,'status':'succeeded','document_status':'parsed_local','locked_by':None,'lease_valid':False,
+               'processed_manifest_local_uri':str(self.destination/'manifest.json'),
+               'processed_manifest_hash':digest(self.staged/'manifest.json')}
+        conn,cur = self.connection(row)
+        with patch.object(receiver,'promote') as write:
+            receiver.receive(conn,self.config,self.claim,self.snapshot,self.staged)
+            write.assert_not_called()
+        self.assertFalse(any('update public.' in c.args[0] for c in cur.execute.call_args_list))
+        regenerated = publish(self.root/'regenerated',DOC,JOB,self.snapshot.sha256,
+                              self.parsed,{},document_version=1)
+        receiver.receive(self.connection(row)[0],self.config,self.claim,self.snapshot,regenerated)
+        row['processed_manifest_hash']='wrong'
+        with self.assertRaises(receiver.SCILeaseLost):
+            receiver.receive(self.connection(row)[0],self.config,self.claim,self.snapshot,self.staged)
+
+    def test_replacement_and_interrupted_publication_recover_fixed_names(self):
+        promote(self.staged,self.destination)
+        new = publish(self.root/'new',DOC,JOB,self.snapshot.sha256,
+                      ParsedDocument([{'text':'new text'}],'new text',1,0),{},document_version=1)
+        import os
+        original = os.replace
+        def interrupt(src,dst):
+            if Path(dst).name=='fulltext.txt':
+                raise OSError('disk full')
+            return original(src,dst)
+        with patch('src.kb_parse_worker.sci_artifacts.os.replace',side_effect=interrupt):
+            with self.assertRaises(OSError):
+                promote(new,self.destination)
+        self.assertFalse((self.destination/'manifest.json').exists())
+        # A hard-killed previous process can leave temporary directories.
+        (self.destination.parent/'.publish-abandoned').mkdir()
+        promote(new,self.destination)
+        verify_run(self.destination,DOC,JOB,self.snapshot.sha256)
+        self.assertEqual((self.destination/'fulltext.txt').read_text(),'new text')
+        self.assertEqual({p.name for p in self.destination.iterdir()},
+                         {'parsed.pkl','fulltext.txt','manifest.json'})
+
+    def test_finalizer_routes_sci_and_preserves_thu(self):
+        for sci in (True,False):
+            snap = self.snapshot if sci else replace(self.snapshot,document_metadata_json={'source_table':'journals'},job_payload_json={})
+            info = SimpleNamespace(artifact_uuid=JOB,manifest_hash='h',chunk_count=1)
+            with patch('src.kb_parse_worker.worker.fetch_two_stage_task_status',return_value=SimpleNamespace(state='SUCCESS',parsed=self.parsed)), \
+                 patch('src.kb_parse_worker.worker.load_parse_snapshot_with_short_connection',return_value=snap), \
+                 patch('src.kb_parse_worker.worker.LeaseMaintainer',NoopLease), \
+                 patch.object(receiver,'finalize',return_value=self.destination) as receive, \
+                 patch('src.kb_parse_worker.worker.write_processed_artifacts_from_parsed',return_value=('manifest',info,{})) as legacy, \
+                 patch('src.kb_parse_worker.worker.build_s3_ready_payload',return_value={}), \
+                 patch('src.kb_parse_worker.worker.complete_parse_local_ready_with_retry') as handoff, \
+                 patch('src.kb_parse_worker.worker.fail_job_with_retry') as failed:
+                ParseFinalizerWorker(self.config).process_claim(self.claim)
+                self.assertEqual(receive.call_count, int(sci))
+                self.assertEqual(legacy.call_count, int(not sci))
+                self.assertEqual(handoff.call_count, int(not sci))
+                failed.assert_not_called()
+
+    def test_db_outage_does_not_requeue_pdf_parsing(self):
+        with patch('src.kb_parse_worker.worker.fetch_two_stage_task_status',return_value=SimpleNamespace(state='SUCCESS',parsed=self.parsed)), \
+             patch('src.kb_parse_worker.worker.load_parse_snapshot_with_short_connection',return_value=self.snapshot), \
+             patch('src.kb_parse_worker.worker.LeaseMaintainer',NoopLease), \
+             patch.object(receiver,'finalize',side_effect=psycopg2.OperationalError('offline')), \
+             patch('src.kb_parse_worker.worker.fail_job_with_retry') as fail:
+            ParseFinalizerWorker(self.config).process_claim(self.claim)
+            fail.assert_not_called()
+
+    def test_reconnect_retries_use_same_staged_manifest(self):
+        conn=MagicMock()
+        hashes=[]
+        def receive(*args):
+            hashes.append(digest(args[-1]/'manifest.json'))
+            if len(hashes)==1:
+                raise psycopg2.OperationalError('lost commit response')
+            return self.destination
+        with patch.object(receiver.control_plane,'connect',return_value=conn), \
+             patch.object(receiver,'receive',side_effect=receive),patch.object(receiver.time,'sleep'):
+            self.assertEqual(receiver.finalize(self.config,self.claim,self.snapshot,self.parsed),self.destination)
+        self.assertEqual(len(hashes),2)
+        self.assertEqual(hashes[0],hashes[1])
+        self.assertEqual(conn.close.call_count,2)
+
+
+if __name__ == '__main__':
+    unittest.main()

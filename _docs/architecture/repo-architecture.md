@@ -11,8 +11,8 @@ checkPaths:
   - src/**
   - docker/**
   - requirements.txt
-lastReviewedAt: 2026-08-20
-lastReviewedCommit: 715aef9c4f063990e083165bc860a04acd9ca45b
+lastReviewedAt: "2026-10-29"
+lastReviewedCommit: "8ffda8e2a880382a4bec5cacbdb36d375b35fa14"
 ---
 
 # Unstructure Architecture
@@ -98,3 +98,43 @@ the referenced files still exist.
   retry wake-up.
 - Edge functions query indexes or storage populated by these workflows, but API
   serving remains outside this repository.
+
+
+## SCI local parsing and future cloud ingestion
+
+SCI jobs reuse the async submitter, `kb_parse_queue`, parser service and
+`ParseFinalizerWorker`. The SCI branch is selected by the explicit
+`sci-ingestion-contract-v1` registration contract, not by a collection name or
+host. Both document metadata and job payload carry `pipeline`; document metadata
+also carries `source_table: journals` and `journal_id` equal to the document UUID.
+The job payload pins `source_sha256` at registration; submitter and receiver
+reject a document whose current hash differs from that pinned source.
+Registrations with an incomplete SCI pipeline marker are rejected rather than
+sent to legacy embedding. Historical source_table metadata alone does not opt
+a document into this new contract.
+
+The receiver writes `NAS_RAW_ROOT/processed/sci/<document UUID>/parsed.pkl`,
+`fulltext.txt` and `manifest.json`. These are parser results without embedding or
+retrieval chunk splitting. The manifest includes document version, source hash,
+job UUID as `run_id`, parser task identity, and payload sizes/SHA-256. The UUID
+in the path is always the SCI document UUID; only the current result is retained.
+
+The receiver locks the job/document rows and checks task, version, source hash,
+SCI identity and lease before publishing. It records `parsed_local` and completes
+the parse job in one database transaction. It does not enqueue the legacy
+`s3_ready` or index stages and does not modify SCI upload/embedding/fulltext times.
+The existing submitter has already archived the PGMQ message. THU registrations
+continue through the existing embedding/artifact/S3-ready branch.
+
+NAS-to-S3 readiness verification, AWS Lambda embedding and search indexing for
+this contract remain future work. `parsed_local` confirms local output only.
+The eventual cloud reader must verify every declared file size/hash and re-read
+the manifest before accepting the set: fixed filenames plus asynchronous sync
+do not guarantee that a manifest arrival means all files have arrived.
+
+A complete manifest alone is not a committed local-stage receipt. The cloud
+reader must also require the current document version/source, a succeeded parse
+job, `parsed_local` document state and an exact
+`kb_documents.processed_manifest_hash` match. The manifest declares this
+`receipt_required` dependency. Files can be complete while a DB transaction is
+being retried; the cloud side must wait in that case.

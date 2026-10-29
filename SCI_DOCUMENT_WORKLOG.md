@@ -658,3 +658,11 @@ lastReviewedCommit: c4d0aa3a28836d0a5425ec1c538ff295d3aa6c67
 ```
 
 只有达到对应验收条件才改为“已关闭”；暂时绕过或仅改代码的事项继续保留。后续每次实际工作追加新条目，不把这段建档记录改写成后来完成的工作。
+
+### 2026-10-29 PIPE-06：平铺产物、PM2 提交端恢复与接收端改造
+
+用户确认只保留文档UUID目录，取消第二层run UUID；142按148旧PM2方式仅启动解析提交Worker，接收结果继续按新方案修改。已将本次2e03c71a-0429-4706-990e-44af753d2c1b的三个产物上移至processed/sci/<文档UUID>/，空run目录移除；文件hash与SCI全行hash保持不变，pipeline manifest路径同步修正。证据为analysis/sci_changes_20261029/sci_parse_probe_47/flatten-verification.json。
+
+148历史PM2日志可见submitter/finalizer/S3/index/delete；本次148无KB消费者。142启动kb-parse-submitter并pm2 save，未配置OS开机启动，未启动旧finalizer或其他下游Worker。140服务未修改。
+
+本机继续Issue47/PR48：现有finalizer增加显式SCI契约分支，输出无embedding的parsed.pkl、fulltext.txt和manifest；只更新pipeline parsed_local/succeeded，不改SCI字段、不发旧S3/index队列。THU旧流程保留。定长文件名采用暂存、持锁验证任务/版本、hardlink+rename发布；未来AWS必须核对manifest及数据库receipt才能消费，文件发布不是DB提交。38项本机测试通过；142临时隔离Postgres18中3项真实SQL测试通过，未接正式数据库。接收端尚未上线，AWS和注册入口仍未实现；PIPE-06整体不关闭。本次无全量提交。

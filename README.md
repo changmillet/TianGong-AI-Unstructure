@@ -13,8 +13,8 @@ checkPaths:
   - requirements.txt
   - src/**
   - docker/**
-lastReviewedAt: 2026-09-19
-lastReviewedCommit: 07f65ef100300d7cb44996476af8a033a9ae8bbc
+lastReviewedAt: "2026-10-29"
+lastReviewedCommit: "8ffda8e2a880382a4bec5cacbdb36d375b35fa14"
 ---
 
 # TianGong AI Unstructure

@@ -57,7 +57,7 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(digest(p/"manifest.json"),before)
 
     def test_failure_before_manifest_leaves_no_ready_output(self):
-        with patch("tests.manual.sci_probe.artifacts.json.dump",side_effect=OSError("disk full")):
+        with patch("src.kb_parse_worker.sci_artifacts.json.dump",side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
                 publish(self.root,DOC,RUN,"source",self.parsed,{})
         self.assertFalse(document_path(self.root,DOC).exists())
@@ -85,7 +85,8 @@ class ArtifactTests(unittest.TestCase):
               '--parser-version','test']
         test_snapshot=replace(snapshot(),document_id=DOC,raw_uri=str(raw_root/'sci_parse_probe'/f'{DOC}.pdf'),
                               collection_path='/sci_parse_probe',collection_storage_path='sci_parse_probe',
-                              sha256=digest(pdf),file_size=pdf.stat().st_size)
+                              sha256=digest(pdf),file_size=pdf.stat().st_size,
+                              document_metadata_json={'source_table':'journals'})
         values={'DATABASE_URL':'postgresql://test','NAS_RAW_ROOT':str(raw_root),
                 'NAS_PROCESSED_ROOT':str(out),'UNSTRUCTURE_SERVE_URL':'http://parser/mineru_with_images',
                 'UNSTRUCTURE_SERVE_BEARER_TOKEN':'test'}

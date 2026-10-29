@@ -12,8 +12,8 @@ checkPaths:
   - requirements.txt
   - src/**
   - docker/**
-lastReviewedAt: 2026-09-19
-lastReviewedCommit: 07f65ef100300d7cb44996476af8a033a9ae8bbc
+lastReviewedAt: "2026-10-29"
+lastReviewedCommit: "8ffda8e2a880382a4bec5cacbdb36d375b35fa14"
 ---
 
 # Unstructure Development Runbook
@@ -293,3 +293,69 @@ referenced path exists.
 Update `_docs/architecture/repo-architecture.md` when a source domain,
 processing stage, output target, or dependency class changes. Update this
 runbook when setup, validation, or job operation steps change.
+
+
+## SCI receiver rollout
+
+Start only the submitter when the receiver/cloud stages are not ready:
+
+```bash
+pm2 start ecosystem.kb_parse_worker.two_stage_async.json --only kb-parse-submitter
+pm2 save
+```
+
+`pm2 save` persists the process list; it does not configure OS boot startup.
+Do not launch the unmodified legacy finalizer for new SCI jobs. Test the receiver
+locally before activating the finalizer. No new CLI mode, worker type, queue or
+schema migration is required by the receiver. Registration/API/Skill rollout
+and AWS processing are separate steps; the manual probe is not a bulk importer.
+A future registration must write both `metadata_json.pipeline` and
+`payload_json.pipeline` as `sci-ingestion-contract-v1`, plus document metadata
+`source_table=journals` and `journal_id=<document UUID>`. Pin the source hash in
+`payload_json.source_sha256` in the same registration/enqueue transaction.
+Both pipeline markers must be written atomically by the registration entrypoint;
+when both are absent the worker must preserve legacy behavior. Do not submit
+new SCI jobs through an entrypoint that omits this contract.
+
+Validation:
+
+```bash
+python -m unittest tests.test_sci_parse tests.test_sci_finalizer tests.test_kb_parse_worker_reliability
+```
+
+SCI output is prepared in a hidden temporary directory. Under current job and
+document locks, the receiver removes the old ready manifest, replaces the two
+payload files using same-filesystem hard links and atomic renames, then publishes
+the new manifest last. This avoids copying large files while holding row locks. An interruption can leave
+no ready manifest; this deliberately prioritizes rejecting incomplete output
+over keeping the previous result readable. It is not an atomic three-file or
+filesystem/database commit. Retry repairs the current files and commits the
+receipt. Do not run another writer against that document directory outside this
+locking protocol. Unexpected entries or symlinks stop replacement for inspection.
+
+Transient database receipt failures reconnect up to three times with the same
+staged manifest. If still unavailable, the finalizer leaves the existing Celery
+task registered; its expired lease can be reclaimed to retry receipt without
+submitting another PDF parse. Stale task/version/lease results cannot commit.
+Completed receipt replay verifies the stored manifest hash/URI and identical
+payload hashes, parser identity and document version; a regenerated creation
+time alone does not rewrite the existing receipt.
+The old artifact reconciler does not understand this SCI manifest; do not use it
+to promote these files into the legacy S3-ready/index queues.
+
+A DB failure after file publication can leave a complete manifest without a
+committed receipt. The future AWS reader must check the database receipt/hash
+matching the manifest, current document/job identity and `parsed_local` state
+as well as file hashes. Hidden `.staging-*`/`.publish-*` directories left by a
+hard process kill are temporary debris, not retained versions; they do not
+block a new attempt and must be excluded from NAS/S3 document discovery.
+
+Optional SQL integration checks use a disposable PostgreSQL database named
+`sci_receiver_test` with no existing KB tables:
+
+```bash
+SCI_TEST_DATABASE_URL=<disposable-database-url> python -m unittest tests.test_sci_finalizer_postgres
+```
+
+These tests create minimal isolated tables, never connect to the live Supabase
+project, and are skipped unless the explicit test URL is set.

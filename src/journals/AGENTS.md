@@ -11,8 +11,8 @@ checkPaths:
   - src/journals/**
   - _docs/architecture/repo-architecture.md
   - _docs/runbooks/development.md
-lastReviewedAt: 2026-08-20
-lastReviewedCommit: 715aef9c4f063990e083165bc860a04acd9ca45b
+lastReviewedAt: "2026-10-29"
+lastReviewedCommit: "8ffda8e2a880382a4bec5cacbdb36d375b35fa14"
 ---
 
 # Journals Agent Notes
