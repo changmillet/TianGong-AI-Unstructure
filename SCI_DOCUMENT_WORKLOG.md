@@ -658,3 +658,32 @@ lastReviewedCommit: c4d0aa3a28836d0a5425ec1c538ff295d3aa6c67
 ```
 
 只有达到对应验收条件才改为“已关闭”；暂时绕过或仅改代码的事项继续保留。后续每次实际工作追加新条目，不把这段建档记录改写成后来完成的工作。
+
+### 2026-10-29 PIPE-06：平铺产物、PM2 提交端恢复与接收端改造
+
+用户确认只保留文档UUID目录，取消第二层run UUID；142按148旧PM2方式仅启动解析提交Worker，接收结果继续按新方案修改。已将本次2e03c71a-0429-4706-990e-44af753d2c1b的三个产物上移至processed/sci/<文档UUID>/，空run目录移除；文件hash与SCI全行hash保持不变，pipeline manifest路径同步修正。证据为analysis/sci_changes_20261029/sci_parse_probe_47/flatten-verification.json。
+
+148历史PM2日志可见submitter/finalizer/S3/index/delete；本次148无KB消费者。142启动kb-parse-submitter并pm2 save，未配置OS开机启动，未启动旧finalizer或其他下游Worker。140服务未修改。
+
+本机继续Issue47/PR48：现有finalizer增加显式SCI契约分支，输出无embedding的parsed.pkl、fulltext.txt和manifest；只更新pipeline parsed_local/succeeded，不改SCI字段、不发旧S3/index队列。THU旧流程保留。定长文件名采用暂存、持锁验证任务/版本、hardlink+rename发布；未来AWS必须核对manifest及数据库receipt才能消费，文件发布不是DB提交。38项本机测试通过；142临时隔离Postgres18中3项真实SQL测试通过，未接正式数据库。接收端尚未上线，AWS和注册入口仍未实现；PIPE-06整体不关闭。本次无全量提交。
+
+
+### 2026-10-29 PIPE-06：SCI 独立 Worker 与队列
+
+用户进一步确定 SCI 与 humanities 分开：旧 Worker 不改、不启动；单独实现 SCI 常驻提交/接收进程并在142做一篇试验。新入口 src/sci_parse_worker，PM2为sci-parse-submitter和sci-parse-finalizer；只读写新private.sci_parse_jobs和kb_sci_parse_queue，复用140解析适配器/服务。旧src/kb_parse_worker/worker.py恢复为本任务基线d02f9c7；停用上一步临时启动的142 kb-parse-submitter并保存PM2配置。
+
+本机45项测试中38项通过、7项真实SQL测试按环境另跑全部通过；包括重复消息、SCI重试不进入旧队列、租约/源文件绑定和发布后DB回滚修复。配套database#41完整本地Supabase迁移、26个SQL smoke、真实Auth/PostgREST、目录比对和升级测试通过，81项离线测试通过。Claude Code独立审阅提出的陈旧消息识别和重处理KB就绪标志问题已修复。接下来部署新迁移和SCI进程，复用上述4页PDF做单篇验收；此条不宣称现场测试完成。无全量处理、Embedding、AWS或journals写入。
+
+
+### 2026-10-29 PIPE-06：激活前恢复边界复核
+
+Claude独立复核发现140状态查询持续异常时缺少截止、租约变更后可能长等及旧S3 manifest key残留。已补截止与仅当前owner可释放租约、清理旧KB S3指针；新增相应回归。完整49项单元/真实PostgreSQL与PGMQ测试通过。正常单篇路径无新增阻断，现场试验仍待执行。
+
+
+### 2026-10-29 20:03 PIPE-06：SCI 独立常驻 Worker 单篇验收通过
+
+142仅运行PM2 sci-parse-submitter和sci-parse-finalizer，源码0b223c8，目录/home/dell/projects/sci-worker-releases/0b223c8；旧kb-parse-submitter保持stopped，旧humanities接收端未启动。配套database#42已审阅合并并自动应用20261029112810迁移，真实142账号的新表/SCI队列权限检查通过。
+
+复用4页文档2e03c71a-0429-4706-990e-44af753d2c1b验证：新独立任务ab1d4c02-2db1-454e-b490-263a579cf336、SCI消息2、140任务7130e318-9e64-4be2-b133-41753e3593ed。20:02:57提交、20:03:22完成，一次成功无重试。单层processed/sci/<文档UUID>/恰有三个文件，64项纯解析结果、全文31490字符，无向量；文件hash与数据库manifest回执匹配，kb_documents为parsed_local。
+
+journals全行hash9458610bb27a0a88d30e9fe719ebdb87保持不变，原PDFhash不变，旧任务和四个旧队列不变。49项本机测试（含8项真实SQL/PGMQ）通过；配套数据库81项离线、26项SQL以及完整本地/官方预览通过。证据analysis/sci_changes_20261029/sci_parse_probe_47/independent-workers/REPORT.md。PM2配置已保存，未安装OS开机启动；仅验证这一篇，不启动全量。NAS同步/S3/AWS/OpenAI/双库写入仍未实现，PIPE-06整体不关闭。

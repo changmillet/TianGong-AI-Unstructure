@@ -12,8 +12,8 @@ checkPaths:
   - requirements.txt
   - src/**
   - docker/**
-lastReviewedAt: 2026-09-19
-lastReviewedCommit: 07f65ef100300d7cb44996476af8a033a9ae8bbc
+lastReviewedAt: "2026-10-29"
+lastReviewedCommit: "0b223c8ec7ad183b0cd06d55a4e41fc4941aa852"
 ---
 
 # Unstructure Development Runbook
@@ -293,3 +293,64 @@ referenced path exists.
 Update `_docs/architecture/repo-architecture.md` when a source domain,
 processing stage, output target, or dependency class changes. Update this
 runbook when setup, validation, or job operation steps change.
+
+
+## Independent SCI workers
+
+Apply the reviewed database migration `20261029112810_sci_parse_jobs.sql` first.
+It adds a private ledger and `kb_sci_parse_queue`; it changes no legacy RPC or
+queue. Verify the runtime role can read/write the private ledger and use its
+PGMQ queue. Do not route new SCI tasks through the old KB enqueue/claim/retry
+functions or the old artifact reconciler.
+
+Use a reviewed source checkout/release directory with the existing runtime
+virtualenv and environment configuration. The original KB worker files remain
+unchanged. Launch only these two names:
+
+```bash
+pm2 start ecosystem.sci_parse_worker.json
+pm2 save
+python -m src.sci_parse_worker.cli enqueue --document-id <SCI-UUID> --job-id <REQUEST-UUID>
+python -m src.sci_parse_worker.cli enqueue --document-id <SCI-UUID> --job-id <REQUEST-UUID> --owner-id <OPERATOR-UUID> --execute
+```
+
+Enqueue defaults to a read-only plan. First registration needs an existing owner
+UUID; `--reprocess` explicitly replaces current results of a compatible existing
+SCI or manual-probe document. Reuse the request job UUID if the enqueue response
+is lost. Queue insertion and registration commit together. A new request cannot
+create another active SCI job for the same document. No batch scan is automatic.
+`pm2 save` saves process state; OS boot startup is a separate configuration.
+
+The submitter records an in-flight marker before calling the parser. If a hard
+crash or timeout makes remote acceptance uncertain, it does not auto-resubmit;
+inspect the SCI job's error and task ID in logs. After a known parser failure,
+bounded retries enqueue only `kb_sci_parse_queue`. Stale duplicate messages are
+archived without changing the current job. Finalizer DB/file failures retain
+its known parser task and retry receipt after a polling delay/lease expiry.
+
+Output is one directory per document UUID with parsed.pkl, fulltext.txt and
+manifest.json. Reprocessing clears KB readiness flags, not journals timestamps
+or existing remote search records. Hidden staging/publish directories can remain
+after SIGKILL; exclude them from document discovery. The future cloud stage must
+verify the database receipt as well as all file hashes; a manifest can exist
+before its DB transaction commits.
+
+Validation:
+
+```bash
+python -m unittest discover -s tests
+SCI_TEST_DATABASE_URL=<owned-disposable-sci_receiver_test-url> python -m unittest tests.test_sci_finalizer_postgres tests.test_sci_control_postgres
+```
+
+The optional SQL tests require an isolated PostgreSQL database named
+`sci_receiver_test`, with PGMQ installed and its test role allowed to create
+queues. They never use the live Supabase project. Database repository's complete
+runtime gate separately applies the real migration and checks RLS/ACL and PGMQ.
+For live qualification submit one explicitly selected PDF, compare its journals
+row before/after, verify three artifacts and private-job receipt, and verify
+legacy parse/S3/index queues plus `kb_jobs` are unchanged.
+
+SCI status-request errors also obey the parser deadline; persistent 404/5xx
+become terminal instead of polling forever. Receipt lease changes release only
+a claim still owned by that worker. Reprocessing clears the old S3 manifest key
+as well as the local receipt and KB readiness flags; journals remains untouched.

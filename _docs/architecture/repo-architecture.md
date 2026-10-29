@@ -11,8 +11,8 @@ checkPaths:
   - src/**
   - docker/**
   - requirements.txt
-lastReviewedAt: 2026-08-20
-lastReviewedCommit: 715aef9c4f063990e083165bc860a04acd9ca45b
+lastReviewedAt: "2026-10-29"
+lastReviewedCommit: "0b223c8ec7ad183b0cd06d55a4e41fc4941aa852"
 ---
 
 # Unstructure Architecture
@@ -98,3 +98,42 @@ the referenced files still exist.
   retry wake-up.
 - Edge functions query indexes or storage populated by these workflows, but API
   serving remains outside this repository.
+
+
+## Independent SCI local parsing
+
+SCI runs `src.sci_parse_worker.cli` as two independently managed processes,
+`sci-parse-submitter` and `sci-parse-finalizer`. It uses the private
+`private.sci_parse_jobs` ledger and `kb_sci_parse_queue`. Neither process calls
+legacy KB claim, retry or finalization RPCs. No new SCI jobs enter `kb_jobs`, so
+unchanged humanities workers and reconcilers cannot claim them. The existing
+KB worker implementation/CLI/ecosystem files remain unchanged.
+
+The submitter reads an already existing SCI PDF, validates its registered hash,
+and calls the existing 140 two-stage PDF service. The parser's own Celery
+queues remain shared infrastructure. SCI records the returned task ID in its
+private ledger and archives its own PGMQ message. The finalizer polls those
+registered tasks; it does not require a second PGMQ queue while the parser runs.
+Retries of a failed parser task go only to the SCI queue. Ambiguous submission
+outcomes stop for inspection rather than silently sending the PDF again.
+
+Registration reuses the journals UUID as the KB document UUID, atomically writes
+both pipeline markers (`sci-ingestion-contract-v1`) and the pinned source hash,
+and enqueues the SCI job. It never generates or changes journals metadata.
+An explicit reprocess accepts only compatible SCI/manual-probe documents with
+no active legacy job, and clears current KB parse/index readiness. Historical
+search data itself is not deleted by registration.
+
+The receiver writes `NAS_RAW_ROOT/processed/sci/<document UUID>/parsed.pkl`,
+`fulltext.txt` and `manifest.json`. There is no run UUID directory and no local
+embedding/chunk splitting. The job UUID remains in the manifest for correlation.
+The receiver verifies current document/task/version/hash/lease under row locks,
+then records `parsed_local` and a succeeded private SCI job. It does not enqueue
+legacy S3/index jobs or change SCI upload, embedding or fulltext times.
+
+Fixed filenames are prepared in staging and published using hard links/renames,
+manifest last. Filesystem publication and database commit are not atomic. The
+future AWS consumer must check both payload hashes and the committed current
+document manifest hash/version/source and succeeded **private SCI job** before
+processing. A complete file set alone is not a completed receipt. NAS-to-S3
+verification, Lambda/OpenAI embedding and indexing are not implemented here.

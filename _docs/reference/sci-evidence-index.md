@@ -12,8 +12,8 @@ checkPaths:
   - .gitignore
   - _docs/runbooks/sci-local-server.md
   - _docs/reference/sci-evidence-index.md
-lastReviewedAt: 2026-10-24
-lastReviewedCommit: c4d0aa3a28836d0a5425ec1c538ff295d3aa6c67
+lastReviewedAt: "2026-10-29"
+lastReviewedCommit: "0b223c8ec7ad183b0cd06d55a4e41fc4941aa852"
 ---
 
 # SCI 历史证据索引
