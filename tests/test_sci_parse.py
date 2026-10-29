@@ -57,7 +57,7 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(digest(p/"manifest.json"),before)
 
     def test_failure_before_manifest_leaves_no_ready_output(self):
-        with patch("src.kb_parse_worker.sci_artifacts.json.dump",side_effect=OSError("disk full")):
+        with patch("src.sci_parse_worker.artifacts.json.dump",side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
                 publish(self.root,DOC,RUN,"source",self.parsed,{})
         self.assertFalse(document_path(self.root,DOC).exists())

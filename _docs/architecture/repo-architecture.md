@@ -12,7 +12,7 @@ checkPaths:
   - docker/**
   - requirements.txt
 lastReviewedAt: "2026-10-29"
-lastReviewedCommit: "8ffda8e2a880382a4bec5cacbdb36d375b35fa14"
+lastReviewedCommit: "e44b06423dff8d5c005c84516704f2e24e9afbac"
 ---
 
 # Unstructure Architecture
@@ -100,41 +100,40 @@ the referenced files still exist.
   serving remains outside this repository.
 
 
-## SCI local parsing and future cloud ingestion
+## Independent SCI local parsing
 
-SCI jobs reuse the async submitter, `kb_parse_queue`, parser service and
-`ParseFinalizerWorker`. The SCI branch is selected by the explicit
-`sci-ingestion-contract-v1` registration contract, not by a collection name or
-host. Both document metadata and job payload carry `pipeline`; document metadata
-also carries `source_table: journals` and `journal_id` equal to the document UUID.
-The job payload pins `source_sha256` at registration; submitter and receiver
-reject a document whose current hash differs from that pinned source.
-Registrations with an incomplete SCI pipeline marker are rejected rather than
-sent to legacy embedding. Historical source_table metadata alone does not opt
-a document into this new contract.
+SCI runs `src.sci_parse_worker.cli` as two independently managed processes,
+`sci-parse-submitter` and `sci-parse-finalizer`. It uses the private
+`private.sci_parse_jobs` ledger and `kb_sci_parse_queue`. Neither process calls
+legacy KB claim, retry or finalization RPCs. No new SCI jobs enter `kb_jobs`, so
+unchanged humanities workers and reconcilers cannot claim them. The existing
+KB worker implementation/CLI/ecosystem files remain unchanged.
+
+The submitter reads an already existing SCI PDF, validates its registered hash,
+and calls the existing 140 two-stage PDF service. The parser's own Celery
+queues remain shared infrastructure. SCI records the returned task ID in its
+private ledger and archives its own PGMQ message. The finalizer polls those
+registered tasks; it does not require a second PGMQ queue while the parser runs.
+Retries of a failed parser task go only to the SCI queue. Ambiguous submission
+outcomes stop for inspection rather than silently sending the PDF again.
+
+Registration reuses the journals UUID as the KB document UUID, atomically writes
+both pipeline markers (`sci-ingestion-contract-v1`) and the pinned source hash,
+and enqueues the SCI job. It never generates or changes journals metadata.
+An explicit reprocess accepts only compatible SCI/manual-probe documents with
+no active legacy job, and clears current KB parse/index readiness. Historical
+search data itself is not deleted by registration.
 
 The receiver writes `NAS_RAW_ROOT/processed/sci/<document UUID>/parsed.pkl`,
-`fulltext.txt` and `manifest.json`. These are parser results without embedding or
-retrieval chunk splitting. The manifest includes document version, source hash,
-job UUID as `run_id`, parser task identity, and payload sizes/SHA-256. The UUID
-in the path is always the SCI document UUID; only the current result is retained.
+`fulltext.txt` and `manifest.json`. There is no run UUID directory and no local
+embedding/chunk splitting. The job UUID remains in the manifest for correlation.
+The receiver verifies current document/task/version/hash/lease under row locks,
+then records `parsed_local` and a succeeded private SCI job. It does not enqueue
+legacy S3/index jobs or change SCI upload, embedding or fulltext times.
 
-The receiver locks the job/document rows and checks task, version, source hash,
-SCI identity and lease before publishing. It records `parsed_local` and completes
-the parse job in one database transaction. It does not enqueue the legacy
-`s3_ready` or index stages and does not modify SCI upload/embedding/fulltext times.
-The existing submitter has already archived the PGMQ message. THU registrations
-continue through the existing embedding/artifact/S3-ready branch.
-
-NAS-to-S3 readiness verification, AWS Lambda embedding and search indexing for
-this contract remain future work. `parsed_local` confirms local output only.
-The eventual cloud reader must verify every declared file size/hash and re-read
-the manifest before accepting the set: fixed filenames plus asynchronous sync
-do not guarantee that a manifest arrival means all files have arrived.
-
-A complete manifest alone is not a committed local-stage receipt. The cloud
-reader must also require the current document version/source, a succeeded parse
-job, `parsed_local` document state and an exact
-`kb_documents.processed_manifest_hash` match. The manifest declares this
-`receipt_required` dependency. Files can be complete while a DB transaction is
-being retried; the cloud side must wait in that case.
+Fixed filenames are prepared in staging and published using hard links/renames,
+manifest last. Filesystem publication and database commit are not atomic. The
+future AWS consumer must check both payload hashes and the committed current
+document manifest hash/version/source and succeeded **private SCI job** before
+processing. A complete file set alone is not a completed receipt. NAS-to-S3
+verification, Lambda/OpenAI embedding and indexing are not implemented here.

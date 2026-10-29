@@ -11,8 +11,8 @@ checkPaths:
   - SCI_DOCUMENT_WORKLOG.md
   - src/journals/**
   - _docs/runbooks/sci-local-server.md
-lastReviewedAt: 2026-10-24
-lastReviewedCommit: c4d0aa3a28836d0a5425ec1c538ff295d3aa6c67
+lastReviewedAt: "2026-10-29"
+lastReviewedCommit: "e44b06423dff8d5c005c84516704f2e24e9afbac"
 ---
 
 # SCI 本机与 141 操作说明
@@ -136,3 +136,14 @@ ssh -o BatchMode=yes -o ConnectTimeout=8 141-bistu-dell-local 'hostname; cd /hom
 本机已仅复制 `analysis/sci_changes_20261011/check_pdf01_sci_search.py`、同目录 `pdf01_status_verification.json` 和 `analysis/sci_audit_20261010/pdf_input_issues_with_metadata.csv`；新增本机入口响应、混合对照、252 ID 清单与指纹见日记第 6.1 节。其他原审计文件仍需到 141 读取，不把这份少量副本当作完整 4.3 GiB 审计备份。
 
 本机 X_API_KEY 已通过此次请求验证，对照和集合请求均 HTTP 200；密钥未传到服务器。查询结论及时间边界以日记为准，不把此次认证成功当作未来永久有效。日记和新证据未同步服务器，用户要求不 commit；NAS 路径、同步健康和产品运行状态没有因此获得新验证。
+
+
+## 2026-10-29 SCI 独立进程
+
+142项目仍为 `/home/dell/projects/TianGong-AI-Unstructure`，NAS文档根为
+`/home/dell/SynologyDrive/docs`。SCI采用独立源码快照和PM2配置
+`ecosystem.sci_parse_worker.json`，进程名 `sci-parse-submitter`、
+`sci-parse-finalizer`；只启这两个进程，不启动旧KB生态配置。新进程依赖
+database#41的private任务表与SCI队列，部署前先验证迁移和实际数据库角色。
+140原two_stage解析服务/Celery保持共享；SCI接收端只发布三个无向量文件，
+详情见[开发说明](development.md)。这不是旧THU链路的解析模式开关。

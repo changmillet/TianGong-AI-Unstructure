@@ -11,7 +11,7 @@ from pathlib import Path
 import psycopg2
 import requests
 
-from . import control_plane, queue, sci_finalizer
+from . import control_plane, queue
 from .artifacts import write_processed_artifacts
 from .chunk_splitter import split_chunks_for_embedding
 from .config import WorkerConfig
@@ -77,8 +77,6 @@ def _is_retryable_http_status(status: int | None) -> bool:
 
 
 def is_parse_failure_retryable(error: Exception) -> bool:
-    if isinstance(error, sci_finalizer.SCIContractError):
-        return False
     if isinstance(error, JobTimeout):
         return True
     if isinstance(error, requests.RequestException):
@@ -719,10 +717,6 @@ class ParseWorker:
                     self.config,
                     claimed.job_id,
                 )
-                if sci_finalizer.is_sci(snapshot):
-                    raise sci_finalizer.SCIContractError(
-                        "SCI ingestion uses the existing async submitter/finalizer pair"
-                    )
                 if snapshot.processed_manifest_local_uri and snapshot.processed_artifact_uuid:
                     manifest_path = Path(snapshot.processed_manifest_local_uri)
                     artifact_info = load_artifact_info(manifest_path, snapshot.processed_manifest_hash)
@@ -883,8 +877,6 @@ class ParseSubmitterWorker:
         submitted = None
         try:
             snapshot = load_parse_snapshot_with_short_connection(self.config, claimed.job_id)
-            if sci_finalizer.is_sci(snapshot):
-                sci_finalizer.validate_contract(snapshot)
             raw_path = resolve_raw_path(snapshot.raw_uri, self.config.nas_raw_root)
             validate_raw_storage_path(snapshot, raw_path, self.config.nas_raw_root)
             _validate_raw_file(raw_path, snapshot.file_size, snapshot.sha256)
@@ -1024,20 +1016,6 @@ class ParseFinalizerWorker:
 
             snapshot = load_parse_snapshot_with_short_connection(self.config, claimed.job_id)
             deadline = JobDeadline("parse", self.config.parse_job_timeout_seconds)
-            if sci_finalizer.is_sci(snapshot):
-                with LeaseMaintainer(self.config, claimed.job_id) as lease:
-                    lease.check()
-                    try:
-                        output = sci_finalizer.finalize(self.config, claimed, snapshot, status.parsed)
-                    except (psycopg2.InterfaceError, psycopg2.OperationalError):
-                        # Preserve the known Celery task for a later receipt retry.
-                        # Requeueing parse here would unnecessarily parse the PDF again.
-                        LOGGER.exception("SCI receipt DB unavailable for %s; retry after lease expiry",
-                                         claimed.job_id)
-                        return
-                LOGGER.info("SCI parse job %s received at %s; awaiting cloud embedding",
-                            claimed.job_id, output)
-                return
             if snapshot.processed_manifest_local_uri and snapshot.processed_artifact_uuid:
                 manifest_path = Path(snapshot.processed_manifest_local_uri)
                 artifact_info = load_artifact_info(
@@ -1089,8 +1067,6 @@ class ParseFinalizerWorker:
                 result.s3_ready_job_id,
                 result.s3_ready_msg_id,
             )
-        except sci_finalizer.SCILeaseLost:
-            LOGGER.warning("SCI parse job %s lost ownership; receipt skipped", claimed.job_id)
         except Exception as exc:
             LOGGER.exception("parse job %s two-stage finalization failed", claimed.job_id)
             retryable = is_parse_failure_retryable(exc)

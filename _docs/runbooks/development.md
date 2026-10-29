@@ -13,7 +13,7 @@ checkPaths:
   - src/**
   - docker/**
 lastReviewedAt: "2026-10-29"
-lastReviewedCommit: "8ffda8e2a880382a4bec5cacbdb36d375b35fa14"
+lastReviewedCommit: "e44b06423dff8d5c005c84516704f2e24e9afbac"
 ---
 
 # Unstructure Development Runbook
@@ -295,67 +295,57 @@ processing stage, output target, or dependency class changes. Update this
 runbook when setup, validation, or job operation steps change.
 
 
-## SCI receiver rollout
+## Independent SCI workers
 
-Start only the submitter when the receiver/cloud stages are not ready:
+Apply the reviewed database migration `20261029112810_sci_parse_jobs.sql` first.
+It adds a private ledger and `kb_sci_parse_queue`; it changes no legacy RPC or
+queue. Verify the runtime role can read/write the private ledger and use its
+PGMQ queue. Do not route new SCI tasks through the old KB enqueue/claim/retry
+functions or the old artifact reconciler.
+
+Use a reviewed source checkout/release directory with the existing runtime
+virtualenv and environment configuration. The original KB worker files remain
+unchanged. Launch only these two names:
 
 ```bash
-pm2 start ecosystem.kb_parse_worker.two_stage_async.json --only kb-parse-submitter
+pm2 start ecosystem.sci_parse_worker.json
 pm2 save
+python -m src.sci_parse_worker.cli enqueue --document-id <SCI-UUID> --job-id <REQUEST-UUID>
+python -m src.sci_parse_worker.cli enqueue --document-id <SCI-UUID> --job-id <REQUEST-UUID> --owner-id <OPERATOR-UUID> --execute
 ```
 
-`pm2 save` persists the process list; it does not configure OS boot startup.
-Do not launch the unmodified legacy finalizer for new SCI jobs. Test the receiver
-locally before activating the finalizer. No new CLI mode, worker type, queue or
-schema migration is required by the receiver. Registration/API/Skill rollout
-and AWS processing are separate steps; the manual probe is not a bulk importer.
-A future registration must write both `metadata_json.pipeline` and
-`payload_json.pipeline` as `sci-ingestion-contract-v1`, plus document metadata
-`source_table=journals` and `journal_id=<document UUID>`. Pin the source hash in
-`payload_json.source_sha256` in the same registration/enqueue transaction.
-Both pipeline markers must be written atomically by the registration entrypoint;
-when both are absent the worker must preserve legacy behavior. Do not submit
-new SCI jobs through an entrypoint that omits this contract.
+Enqueue defaults to a read-only plan. First registration needs an existing owner
+UUID; `--reprocess` explicitly replaces current results of a compatible existing
+SCI or manual-probe document. Reuse the request job UUID if the enqueue response
+is lost. Queue insertion and registration commit together. A new request cannot
+create another active SCI job for the same document. No batch scan is automatic.
+`pm2 save` saves process state; OS boot startup is a separate configuration.
+
+The submitter records an in-flight marker before calling the parser. If a hard
+crash or timeout makes remote acceptance uncertain, it does not auto-resubmit;
+inspect the SCI job's error and task ID in logs. After a known parser failure,
+bounded retries enqueue only `kb_sci_parse_queue`. Stale duplicate messages are
+archived without changing the current job. Finalizer DB/file failures retain
+its known parser task and retry receipt after a polling delay/lease expiry.
+
+Output is one directory per document UUID with parsed.pkl, fulltext.txt and
+manifest.json. Reprocessing clears KB readiness flags, not journals timestamps
+or existing remote search records. Hidden staging/publish directories can remain
+after SIGKILL; exclude them from document discovery. The future cloud stage must
+verify the database receipt as well as all file hashes; a manifest can exist
+before its DB transaction commits.
 
 Validation:
 
 ```bash
-python -m unittest tests.test_sci_parse tests.test_sci_finalizer tests.test_kb_parse_worker_reliability
+python -m unittest discover -s tests
+SCI_TEST_DATABASE_URL=<owned-disposable-sci_receiver_test-url> python -m unittest tests.test_sci_finalizer_postgres tests.test_sci_control_postgres
 ```
 
-SCI output is prepared in a hidden temporary directory. Under current job and
-document locks, the receiver removes the old ready manifest, replaces the two
-payload files using same-filesystem hard links and atomic renames, then publishes
-the new manifest last. This avoids copying large files while holding row locks. An interruption can leave
-no ready manifest; this deliberately prioritizes rejecting incomplete output
-over keeping the previous result readable. It is not an atomic three-file or
-filesystem/database commit. Retry repairs the current files and commits the
-receipt. Do not run another writer against that document directory outside this
-locking protocol. Unexpected entries or symlinks stop replacement for inspection.
-
-Transient database receipt failures reconnect up to three times with the same
-staged manifest. If still unavailable, the finalizer leaves the existing Celery
-task registered; its expired lease can be reclaimed to retry receipt without
-submitting another PDF parse. Stale task/version/lease results cannot commit.
-Completed receipt replay verifies the stored manifest hash/URI and identical
-payload hashes, parser identity and document version; a regenerated creation
-time alone does not rewrite the existing receipt.
-The old artifact reconciler does not understand this SCI manifest; do not use it
-to promote these files into the legacy S3-ready/index queues.
-
-A DB failure after file publication can leave a complete manifest without a
-committed receipt. The future AWS reader must check the database receipt/hash
-matching the manifest, current document/job identity and `parsed_local` state
-as well as file hashes. Hidden `.staging-*`/`.publish-*` directories left by a
-hard process kill are temporary debris, not retained versions; they do not
-block a new attempt and must be excluded from NAS/S3 document discovery.
-
-Optional SQL integration checks use a disposable PostgreSQL database named
-`sci_receiver_test` with no existing KB tables:
-
-```bash
-SCI_TEST_DATABASE_URL=<disposable-database-url> python -m unittest tests.test_sci_finalizer_postgres
-```
-
-These tests create minimal isolated tables, never connect to the live Supabase
-project, and are skipped unless the explicit test URL is set.
+The optional SQL tests require an isolated PostgreSQL database named
+`sci_receiver_test`, with PGMQ installed and its test role allowed to create
+queues. They never use the live Supabase project. Database repository's complete
+runtime gate separately applies the real migration and checks RLS/ACL and PGMQ.
+For live qualification submit one explicitly selected PDF, compare its journals
+row before/after, verify three artifacts and private-job receipt, and verify
+legacy parse/S3/index queues plus `kb_jobs` are unchanged.

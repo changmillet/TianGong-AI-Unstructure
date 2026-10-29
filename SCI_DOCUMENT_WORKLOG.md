@@ -666,3 +666,10 @@ lastReviewedCommit: c4d0aa3a28836d0a5425ec1c538ff295d3aa6c67
 148历史PM2日志可见submitter/finalizer/S3/index/delete；本次148无KB消费者。142启动kb-parse-submitter并pm2 save，未配置OS开机启动，未启动旧finalizer或其他下游Worker。140服务未修改。
 
 本机继续Issue47/PR48：现有finalizer增加显式SCI契约分支，输出无embedding的parsed.pkl、fulltext.txt和manifest；只更新pipeline parsed_local/succeeded，不改SCI字段、不发旧S3/index队列。THU旧流程保留。定长文件名采用暂存、持锁验证任务/版本、hardlink+rename发布；未来AWS必须核对manifest及数据库receipt才能消费，文件发布不是DB提交。38项本机测试通过；142临时隔离Postgres18中3项真实SQL测试通过，未接正式数据库。接收端尚未上线，AWS和注册入口仍未实现；PIPE-06整体不关闭。本次无全量提交。
+
+
+### 2026-10-29 PIPE-06：SCI 独立 Worker 与队列
+
+用户进一步确定 SCI 与 humanities 分开：旧 Worker 不改、不启动；单独实现 SCI 常驻提交/接收进程并在142做一篇试验。新入口 src/sci_parse_worker，PM2为sci-parse-submitter和sci-parse-finalizer；只读写新private.sci_parse_jobs和kb_sci_parse_queue，复用140解析适配器/服务。旧src/kb_parse_worker/worker.py恢复为本任务基线d02f9c7；停用上一步临时启动的142 kb-parse-submitter并保存PM2配置。
+
+本机45项测试中38项通过、7项真实SQL测试按环境另跑全部通过；包括重复消息、SCI重试不进入旧队列、租约/源文件绑定和发布后DB回滚修复。配套database#41完整本地Supabase迁移、26个SQL smoke、真实Auth/PostgREST、目录比对和升级测试通过，81项离线测试通过。Claude Code独立审阅提出的陈旧消息识别和重处理KB就绪标志问题已修复。接下来部署新迁移和SCI进程，复用上述4页PDF做单篇验收；此条不宣称现场测试完成。无全量处理、Embedding、AWS或journals写入。

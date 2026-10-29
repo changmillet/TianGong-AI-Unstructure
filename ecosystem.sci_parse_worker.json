@@ -1,0 +1,30 @@
+{
+  "apps": [
+    {
+      "name": "sci-parse-submitter",
+      "cwd": ".",
+      "script": ".venv/bin/python",
+      "interpreter": "none",
+      "args": "-m src.sci_parse_worker.cli run --worker submitter",
+      "env": {"PYTHONUNBUFFERED": "1", "KB_PARSE_USE_TWO_STAGE": "true"},
+      "autorestart": true,
+      "restart_delay": 5000,
+      "max_restarts": 10,
+      "out_file": "logs/sci-parse-submitter.out.log",
+      "error_file": "logs/sci-parse-submitter.err.log"
+    },
+    {
+      "name": "sci-parse-finalizer",
+      "cwd": ".",
+      "script": ".venv/bin/python",
+      "interpreter": "none",
+      "args": "-m src.sci_parse_worker.cli run --worker finalizer",
+      "env": {"PYTHONUNBUFFERED": "1", "KB_PARSE_USE_TWO_STAGE": "true"},
+      "autorestart": true,
+      "restart_delay": 5000,
+      "max_restarts": 10,
+      "out_file": "logs/sci-parse-finalizer.out.log",
+      "error_file": "logs/sci-parse-finalizer.err.log"
+    }
+  ]
+}

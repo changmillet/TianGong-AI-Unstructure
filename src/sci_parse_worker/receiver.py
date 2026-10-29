@@ -1,4 +1,4 @@
-"""Local SCI receipt in the existing async worker; cloud indexing is separate."""
+"""Local receipt for the independent SCI worker; cloud indexing is separate."""
 from __future__ import annotations
 
 import tempfile
@@ -10,8 +10,8 @@ from uuid import UUID
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 
-from . import control_plane
-from .sci_artifacts import PIPELINE, digest, document_path, promote, publish, verify_run
+from src.kb_parse_worker import control_plane
+from .artifacts import PIPELINE, digest, document_path, promote, publish, verify_run
 
 
 class SCIContractError(ValueError):
@@ -53,11 +53,11 @@ def receive(conn, config, claimed, snapshot, staged: Path) -> Path:
         raise SCIContractError('SCI manifest document version mismatch')
     manifest_hash = digest(staged / 'manifest.json')
     with conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute('''select j.document_id,j.document_version as job_version,j.stage,j.status,
+        cur.execute('''select j.document_id,j.document_version as job_version,'parse' as stage,j.status,j.phase,j.source_sha256,
             j.locked_by,j.locked_until>clock_timestamp() as lease_valid,j.payload_json,
             d.document_version,d.deleted_at,d.sha256,d.metadata_json,d.status as document_status,
             d.processed_manifest_local_uri,d.processed_manifest_hash
-            from public.kb_jobs j join public.kb_documents d on d.id=j.document_id
+            from private.sci_parse_jobs j join public.kb_documents d on d.id=j.document_id
             where j.id=%s for update of j,d''', (claimed.job_id,))
         row = cur.fetchone()
         if (not row or str(row['document_id']) != snapshot.document_id
@@ -66,7 +66,8 @@ def receive(conn, config, claimed, snapshot, staged: Path) -> Path:
                 or claimed.document_version != snapshot.document_version
                 or row['document_version'] != snapshot.document_version
                 or row['deleted_at'] is not None or row['sha256'] != snapshot.sha256
-                or row['stage'] != 'parse'
+                or row['stage'] != 'parse' or row['phase'] != 'receive'
+                or row['source_sha256'] != snapshot.sha256
                 or not isinstance(row['payload_json'].get('two_stage'), dict)
                 or row['payload_json']['two_stage'].get('task_id') != claimed.task_id):
             raise SCILeaseLost('SCI document/task identity changed before publication')
@@ -94,7 +95,7 @@ def receive(conn, config, claimed, snapshot, staged: Path) -> Path:
             raise SCILeaseLost('SCI job lease lost before publication')
         promote(staged, destination)
         verify_run(destination, snapshot.document_id, claimed.job_id, snapshot.sha256)
-        cur.execute('''update public.kb_jobs set status='succeeded',finished_at=now(),
+        cur.execute('''update private.sci_parse_jobs set status='succeeded',finished_at=now(),updated_at=now(),
             locked_by=null,locked_until=null,next_retry_at=null,last_error=null,
             payload_json=payload_json || %s where id=%s
             and locked_by=%s and locked_until>clock_timestamp() returning id''',
