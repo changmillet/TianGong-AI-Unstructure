@@ -14,6 +14,7 @@ class ControlTests(receipt_tests.PostgresReceiptTests):
         self.fixture.config.database_url=os.environ['SCI_TEST_DATABASE_URL']
         self.fixture.config.lock_seconds=1800
         self.fixture.config.queue_vt_seconds=1800
+        self.fixture.config.poll_interval_seconds=5
         with self.conn,self.conn.cursor() as cur:
             cur.execute('create extension if not exists pgmq')
             cur.execute("do $$ begin create type public.kb_document_status as enum ('parse_queued','parsing','failed'); exception when duplicate_object then null; end $$")
@@ -77,6 +78,13 @@ class ControlTests(receipt_tests.PostgresReceiptTests):
             cur.execute('select pgmq.send(%s,%s::jsonb)',(control.QUEUE,'{"job_id":"'+JOB+'"}'))
         self.assertIsNone(control.claim_submission(self.fixture.config))
         self.assertEqual(self.state()[0][0],'running')
+
+    def test_defer_cannot_release_another_worker_claim(self):
+        self.submit()
+        with self.conn,self.conn.cursor() as cur:
+            cur.execute("update private.sci_parse_jobs set locked_by='replacement'")
+        control.defer_result(self.fixture.config,JOB,'old worker completed')
+        self.assertEqual(self.state()[0],('running','replacement'))
 
     def test_uncertain_submission_is_not_submitted_again(self):
         claim=control.claim_submission(self.fixture.config)

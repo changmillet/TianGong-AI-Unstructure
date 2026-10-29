@@ -13,7 +13,7 @@ checkPaths:
   - src/**
   - docker/**
 lastReviewedAt: "2026-10-29"
-lastReviewedCommit: "e44b06423dff8d5c005c84516704f2e24e9afbac"
+lastReviewedCommit: "12b5cd0822f9dc8a139dd125e6f1da2415e7decc"
 ---
 
 # Unstructure Development Runbook
@@ -349,3 +349,8 @@ runtime gate separately applies the real migration and checks RLS/ACL and PGMQ.
 For live qualification submit one explicitly selected PDF, compare its journals
 row before/after, verify three artifacts and private-job receipt, and verify
 legacy parse/S3/index queues plus `kb_jobs` are unchanged.
+
+SCI status-request errors also obey the parser deadline; persistent 404/5xx
+become terminal instead of polling forever. Receipt lease changes release only
+a claim still owned by that worker. Reprocessing clears the old S3 manifest key
+as well as the local receipt and KB readiness flags; journals remains untouched.

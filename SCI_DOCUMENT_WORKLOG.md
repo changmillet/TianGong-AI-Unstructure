@@ -673,3 +673,8 @@ lastReviewedCommit: c4d0aa3a28836d0a5425ec1c538ff295d3aa6c67
 用户进一步确定 SCI 与 humanities 分开：旧 Worker 不改、不启动；单独实现 SCI 常驻提交/接收进程并在142做一篇试验。新入口 src/sci_parse_worker，PM2为sci-parse-submitter和sci-parse-finalizer；只读写新private.sci_parse_jobs和kb_sci_parse_queue，复用140解析适配器/服务。旧src/kb_parse_worker/worker.py恢复为本任务基线d02f9c7；停用上一步临时启动的142 kb-parse-submitter并保存PM2配置。
 
 本机45项测试中38项通过、7项真实SQL测试按环境另跑全部通过；包括重复消息、SCI重试不进入旧队列、租约/源文件绑定和发布后DB回滚修复。配套database#41完整本地Supabase迁移、26个SQL smoke、真实Auth/PostgREST、目录比对和升级测试通过，81项离线测试通过。Claude Code独立审阅提出的陈旧消息识别和重处理KB就绪标志问题已修复。接下来部署新迁移和SCI进程，复用上述4页PDF做单篇验收；此条不宣称现场测试完成。无全量处理、Embedding、AWS或journals写入。
+
+
+### 2026-10-29 PIPE-06：激活前恢复边界复核
+
+Claude独立复核发现140状态查询持续异常时缺少截止、租约变更后可能长等及旧S3 manifest key残留。已补截止与仅当前owner可释放租约、清理旧KB S3指针；新增相应回归。完整49项单元/真实PostgreSQL与PGMQ测试通过。正常单篇路径无新增阻断，现场试验仍待执行。

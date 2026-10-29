@@ -73,6 +73,7 @@ def enqueue(config,plan,owner_id,reprocess=False):
             version=1
         cur.execute('''update public.kb_documents set status='parse_queued',raw_uri=%s,
           metadata_json=coalesce(metadata_json,'{}'::jsonb)||%s,processed_manifest_local_uri=null,
+          processed_manifest_s3_key=null,
           processed_manifest_hash=null,processed_artifact_uuid=null,chunk_count=null,parse_time=null,
           index_time=null,processed_s3_ready_at=null,opensearch_indexed=false,pinecone_indexed=false,
           last_error=null,last_error_stage=null

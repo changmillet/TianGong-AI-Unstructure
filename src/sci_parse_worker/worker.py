@@ -79,6 +79,11 @@ class Submitter(Worker):
 
 
 class Finalizer(Worker):
+    def expired(self, snapshot):
+        submitted_at = snapshot.job_payload_json.get('submitted_at')
+        return bool(submitted_at and (datetime.now(timezone.utc) -
+            datetime.fromisoformat(submitted_at)).total_seconds() > self.config.parse_job_timeout_seconds)
+
     def run_once(self):
         c=self.config
         claim=control.claim_result(c)
@@ -92,7 +97,10 @@ class Finalizer(Worker):
                     c.unstructure_serve_bearer_token,claim.task_id,
                     timeout_seconds=c.two_stage_status_timeout_seconds,return_txt=True)
             except Exception as exc:
-                control.defer_result(c,claim.job_id,str(exc))
+                if self.expired(snap):
+                    control.fail(c,claim.job_id,'SCI parser status deadline exceeded: '+str(exc),False)
+                else:
+                    control.defer_result(c,claim.job_id,str(exc))
                 return True
             if status.state in {'FAILURE','REVOKED'}:
                 control.fail(c,claim.job_id,status.error or status.state,True)
@@ -100,14 +108,14 @@ class Finalizer(Worker):
                 output=receiver.finalize(c,claim,snap,status.parsed)
                 LOG.info('SCI parsed_local document=%s job=%s output=%s',snap.document_id,claim.job_id,output)
             else:
-                submitted_at=snap.job_payload_json.get('submitted_at')
-                expired=submitted_at and (datetime.now(timezone.utc)-datetime.fromisoformat(submitted_at)).total_seconds()>c.parse_job_timeout_seconds
-                if expired:
+                if self.expired(snap):
                     control.fail(c,claim.job_id,'SCI parser result deadline exceeded',False)
                 else:
                     control.defer_result(c,claim.job_id)
         except receiver.SCILeaseLost:
             LOG.warning('SCI receipt lease/task changed job=%s; no stale write',claim.job_id)
+            # The owner predicate cannot release a replacement worker's claim.
+            control.defer_result(c,claim.job_id,'SCI receipt lease/task changed')
         except (psycopg2.InterfaceError,psycopg2.OperationalError,OSError) as exc:
             # Keep the known parser task, not a second PDF submission.
             LOG.exception('SCI receipt temporarily unavailable job=%s',claim.job_id)
