@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 from src.kb_parse_worker.config import database_url_from_env
 from src.kb_parse_worker.parser_adapter import parse_with_unstructure_serve
-from .artifacts import PIPELINE, digest, publish, run_path, verify_run
+from .artifacts import PIPELINE, digest, publish, document_path, verify_run
 from .registry import complete, journal, cancel_probe
 
 
@@ -77,7 +77,7 @@ def main(argv=None):
     try:
         before=journal(conn,args.document_id)
         raw=source_path(args.pdf_root,before["doi"])
-        output=run_path(args.output_root.resolve(),args.document_id,args.run_id)
+        output=document_path(args.output_root.resolve(),args.document_id)
         alias=config.nas_raw_root / COLLECTION_PATH.strip("/") / (args.document_id+".pdf")
         plan={"pipeline":PIPELINE,"document_id":args.document_id,"run_id":args.run_id,
               "doi":before["doi"],"source_path":str(raw),"filename":raw.name,

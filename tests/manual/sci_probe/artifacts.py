@@ -1,4 +1,4 @@
-"""Publish immutable parse-only runs; no embedding or legacy artifact writes."""
+"""Publish the current parsing output directly under the SCI document UUID."""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ def digest(path: Path) -> str:
     return h.hexdigest()
 
 
-def run_path(root: Path, document_id: str, run_id: str) -> Path:
-    return root / str(UUID(document_id)) / str(UUID(run_id))
+def document_path(root: Path, document_id: str) -> Path:
+    return root / str(UUID(document_id))
 
 
 def reject_vectors(value: object) -> None:
@@ -62,7 +62,7 @@ def verify_run(directory: Path, document_id: str, run_id: str, source_hash: str)
 
 def publish(root: Path, document_id: str, run_id: str, source_hash: str,
             parsed: ParsedDocument, parser: dict) -> Path:
-    destination = run_path(root, document_id, run_id)
+    destination = document_path(root, document_id)
     if destination.exists():
         raise FileExistsError("run already exists; verify and finalize instead of overwriting")
     if not parsed.result or not parsed.txt or not parsed.txt.strip():

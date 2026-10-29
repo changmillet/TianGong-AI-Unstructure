@@ -29,7 +29,9 @@ message with real conditional `pgmq.read` before committing; other messages
 are not consumed. The existing Worker claims that message and maintains its
 lease. `max_attempts=1` bounds failures without automatic retries. Successful
 parser output becomes `parsed.pkl` (no vector fields), `fulltext.txt`, and
-`manifest.json` under `UUID/run_id`. Manifest identity, sizes and SHA256 are
+`manifest.json` directly under `UUID/`. The run ID remains in the manifest and
+job receipt for correlation; it does not create a second directory or retain
+historical output versions. Manifest identity, sizes and SHA256 are
 verified before a test-only receipt transaction marks the parse job succeeded,
 document parsed and archives this queue message. No S3-ready job is created.
 SCI rows are SELECT-only and compared in full before/after.

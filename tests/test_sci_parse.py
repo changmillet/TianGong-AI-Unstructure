@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from src.kb_parse_worker.parser_adapter import ParsedDocument
-from tests.manual.sci_probe.artifacts import digest, publish, verify_run, run_path
+from tests.manual.sci_probe.artifacts import digest, publish, verify_run, document_path
 from tests.manual.sci_probe.cli import source_path, prior_artifacts, main
 from src.kb_parse_worker.queue import QueueMessage
 from tests.test_kb_parse_worker_artifacts import snapshot
@@ -31,6 +31,7 @@ class ArtifactTests(unittest.TestCase):
 
     def test_roundtrip_and_tampering(self):
         p = publish(self.root, DOC, RUN, "source", self.parsed, {"version":"test"})
+        self.assertEqual(p, self.root / DOC)
         self.assertEqual(set(x.name for x in p.iterdir()), {"parsed.pkl","fulltext.txt","manifest.json"})
         self.assertEqual(pickle.loads((p/"parsed.pkl").read_bytes()), self.parsed.result)
         self.assertEqual((p/"fulltext.txt").read_text(), self.parsed.txt)
@@ -46,7 +47,7 @@ class ArtifactTests(unittest.TestCase):
                     ParsedDocument([{"text":"x","extra":{"embedding":[1]}}],"x",1,0)]:
             with self.assertRaises(ValueError):
                 publish(self.root,DOC,RUN,"source",bad,{})
-            self.assertFalse(run_path(self.root,DOC,RUN).exists())
+            self.assertFalse(document_path(self.root,DOC).exists())
 
     def test_existing_run_never_overwritten(self):
         p=publish(self.root,DOC,RUN,"source",self.parsed,{})
@@ -59,8 +60,8 @@ class ArtifactTests(unittest.TestCase):
         with patch("tests.manual.sci_probe.artifacts.json.dump",side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
                 publish(self.root,DOC,RUN,"source",self.parsed,{})
-        self.assertFalse(run_path(self.root,DOC,RUN).exists())
-        self.assertEqual(list((self.root/DOC).iterdir()),[])
+        self.assertFalse(document_path(self.root,DOC).exists())
+        self.assertEqual(list(self.root.iterdir()),[])
 
     def test_source_path_and_legacy_aliases(self):
         (self.root/"10.1").mkdir()
@@ -103,7 +104,7 @@ class ArtifactTests(unittest.TestCase):
             self.assertFalse(raw_root.exists())
             self.assertEqual(main(args+['--execute']),0)
             register.assert_called_once();parse.assert_called_once();complete.assert_called_once()
-            self.assertEqual(pickle.loads((out/DOC/RUN/'parsed.pkl').read_bytes()),self.parsed.result)
+            self.assertEqual(pickle.loads((out/DOC/'parsed.pkl').read_bytes()),self.parsed.result)
             self.assertTrue((raw_root/'sci_parse_probe'/f'{DOC}.pdf').is_symlink())
 
 
