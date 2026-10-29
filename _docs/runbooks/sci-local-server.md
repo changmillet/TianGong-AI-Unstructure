@@ -12,7 +12,7 @@ checkPaths:
   - src/journals/**
   - _docs/runbooks/sci-local-server.md
 lastReviewedAt: "2026-10-29"
-lastReviewedCommit: "e44b06423dff8d5c005c84516704f2e24e9afbac"
+lastReviewedCommit: "0b223c8ec7ad183b0cd06d55a4e41fc4941aa852"
 ---
 
 # SCI 本机与 141 操作说明
@@ -147,3 +147,9 @@ ssh -o BatchMode=yes -o ConnectTimeout=8 141-bistu-dell-local 'hostname; cd /hom
 database#41的private任务表与SCI队列，部署前先验证迁移和实际数据库角色。
 140原two_stage解析服务/Celery保持共享；SCI接收端只发布三个无向量文件，
 详情见[开发说明](development.md)。这不是旧THU链路的解析模式开关。
+
+20:03单篇验收通过：部署快照 `/home/dell/projects/sci-worker-releases/0b223c8`
+通过符号链接复用原项目 `.venv` 和 `.env`。两个SCI进程online、零重启；
+PM2已save，旧 `kb-parse-submitter` 保持stopped。140原服务未改。
+任务及三文件校验见工作日记PIPE-06当日验收条目；这不是全量验收，
+也不表示云端部分已实现。回滚只停止两个SCI进程，保留任务与产物证据。

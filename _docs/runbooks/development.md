@@ -13,7 +13,7 @@ checkPaths:
   - src/**
   - docker/**
 lastReviewedAt: "2026-10-29"
-lastReviewedCommit: "12b5cd0822f9dc8a139dd125e6f1da2415e7decc"
+lastReviewedCommit: "0b223c8ec7ad183b0cd06d55a4e41fc4941aa852"
 ---
 
 # Unstructure Development Runbook
