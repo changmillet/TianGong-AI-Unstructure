@@ -711,3 +711,10 @@ journals全行hash9458610bb27a0a88d30e9fe719ebdb87保持不变，原PDFhash不�
 ### 2026-11-01 PIPE-06：SCI 提交端空闲退避（开始）
 
 关联unstructure#51。用户授权按30/60/5秒策略修改SCI提交端；连续3次未领取到任务开始60秒等待，有任务恢复原5秒。140容量已满、请求失败不算空队列；接收结果Worker保持5秒，不改旧humanities代码/进程。当前142两SCI进程运行44fdf58，提交PID304127、接收PID304128；以已合并7d79fcb为本机基线。只做无新增任务的轮询验收，不触发PDF重拆、不改数据。Claude App当前连接失败，独立审阅不可用。验收为本机状态转换测试通过、142可观察30/60秒退避且接收端PID不变；保留旧release回退。
+
+
+### 2026-11-01 16:00 PIPE-06：SCI 提交端30/60秒退避已生效
+
+关联unstructure#51/PR52，部署源码b4bf9d1，142 release为/home/dell/projects/sci-worker-releases/b4bf9d1。15:58:59日志首次wait_seconds=30/consecutive_empty=1，16:00:03第三次无可领取任务切至60秒（两轮含网络耗时共约64秒）。提交端PID477718，零自动重启；接收端PID304128、旧44fdf58代码及5秒配置未改，humanities保持stopped，PM2配置已save。未新增或重拆PDF，数据库迁移、元数据、产物和索引未改。
+
+本机58项测试中50通过、8项可选隔离SQL未跑（本次无SQL修改）；142实际Python3.12环境8项轮询/恢复测试通过，docpact配置与lint通过。空闲、收到任务复位、140容量繁忙、HTTP/数据库异常、接收端5秒均有离线回归。部署前确认SCI活动任务0、队列消息0。PM2 startOrRestart未更新cwd，核实后仅删除并重新登记提交端至绝对路径；未触碰接收端或旧worker。旧release44fdf58完整保留可回退。证据analysis/sci_changes_20261101/idle_polling_51/verification.json。PIPE-06整体仍未完成；本轮仅调度频率完成，日记留本机维护。
