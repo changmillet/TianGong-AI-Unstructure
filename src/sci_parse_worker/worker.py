@@ -25,15 +25,40 @@ class Worker:
     def run_forever(self):
         LOG.info('SCI %s online queue=%s worker=%s',type(self).__name__,control.QUEUE,self.config.worker_id)
         while True:
+            processed = None
             try:
-                self.run_once()
+                processed = self.run_once()
             except Exception:
                 LOG.exception('SCI worker iteration failed; retry after poll interval')
-            time.sleep(self.config.poll_interval_seconds)
+            time.sleep(self.next_poll_interval(processed))
+
+    def next_poll_interval(self, processed):
+        return self.config.poll_interval_seconds
 
 
 class Submitter(Worker):
+    def __init__(self, config):
+        super().__init__(config)
+        self._no_claim = False
+        self._empty_polls = 0
+        self._last_poll_interval = config.poll_interval_seconds
+
+    def next_poll_interval(self, processed):
+        # No eligible claim is distinct from parser backpressure or a failed query.
+        if processed is False and self._no_claim:
+            self._empty_polls = min(self._empty_polls + 1, 3)
+            interval = 60 if self._empty_polls >= 3 else 30
+        else:
+            self._empty_polls = 0
+            interval = self.config.poll_interval_seconds
+        if interval != self._last_poll_interval:
+            LOG.info('SCI submitter polling wait_seconds=%s consecutive_empty=%s',
+                     interval, self._empty_polls)
+            self._last_poll_interval = interval
+        return interval
+
     def run_once(self):
+        self._no_claim = False
         c=self.config
         backlog=fetch_two_stage_queue_status(c.unstructure_serve_two_stage_base_url,
                     c.unstructure_serve_bearer_token,timeout_seconds=c.two_stage_queue_status_timeout_seconds)
@@ -41,6 +66,7 @@ class Submitter(Worker):
             return False
         claim=control.claim_submission(c)
         if claim is None:
+            self._no_claim = True
             return False
         started=False
         submitted=None

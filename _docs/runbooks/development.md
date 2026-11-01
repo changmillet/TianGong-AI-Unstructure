@@ -13,7 +13,7 @@ checkPaths:
   - src/**
   - docker/**
 lastReviewedAt: "2026-11-01"
-lastReviewedCommit: "b551c19864379cd3addd3b866c0f397f392952be"
+lastReviewedCommit: "7d79fcb8d580de3d23f52d1d83f5ca518567c723"
 ---
 
 # Unstructure Development Runbook
@@ -320,6 +320,18 @@ SCI or manual-probe document. Reuse the request job UUID if the enqueue response
 is lost. Queue insertion and registration commit together. A new request cannot
 create another active SCI job for the same document. No batch scan is automatic.
 `pm2 save` saves process state; OS boot startup is a separate configuration.
+
+SCI submitter idle scheduling is independent of the finalizer: after no eligible
+submission is claimed, wait 30 seconds; the third consecutive no-claim result
+and later ones wait 60 seconds. A claimed task resets the streak. Parser capacity
+backpressure and exceptions also reset it and use the existing active interval
+(`KB_PARSE_POLL_INTERVAL_SECONDS`, 5 seconds on 142). An empty claim means no
+eligible work was returned; it is not a count of all delayed/invisible messages.
+The finalizer keeps the configured 5-second interval, including while waiting
+for parser results. These waits start after each iteration; network and work
+execution time are additional. Only wait changes are logged at INFO level.
+To deploy this scheduling-only change, switch/restart only `sci-parse-submitter`
+from a versioned release and preserve the finalizer process and configuration.
 
 The submitter records an in-flight marker before calling the parser. If a hard
 crash or timeout makes remote acceptance uncertain, it does not auto-resubmit;
