@@ -111,7 +111,7 @@ class ReceiverTests(unittest.TestCase):
         import os
         original = os.replace
         def interrupt(src,dst):
-            if Path(dst).name=='fulltext.txt':
+            if Path(dst).name==f'{DOC}.txt':
                 raise OSError('disk full')
             return original(src,dst)
         with patch('src.sci_parse_worker.artifacts.os.replace',side_effect=interrupt):
@@ -122,9 +122,53 @@ class ReceiverTests(unittest.TestCase):
         (self.destination.parent/'.publish-abandoned').mkdir()
         promote(new,self.destination)
         verify_run(self.destination,DOC,JOB,self.snapshot.sha256)
-        self.assertEqual((self.destination/'fulltext.txt').read_text(),'new text')
+        self.assertEqual((self.destination/f'{DOC}.txt').read_text(),'new text')
         self.assertEqual({p.name for p in self.destination.iterdir()},
-                         {'parsed.pkl','fulltext.txt','manifest.json'})
+                         {f'{DOC}.pkl',f'{DOC}.txt','manifest.json'})
+
+    def test_legacy_names_retired_before_new_manifest_and_replay_recovers(self):
+        import os
+        self.destination.mkdir(parents=True)
+        for name in ('parsed.pkl', 'fulltext.txt', 'manifest.json'):
+            (self.destination/name).write_text('previous output')
+        original = os.replace
+
+        def interrupt(src, dst):
+            if Path(dst).name == f'{DOC}.txt':
+                raise OSError('interrupted replacement')
+            return original(src, dst)
+
+        with patch('src.sci_parse_worker.artifacts.os.replace', side_effect=interrupt):
+            with self.assertRaises(OSError):
+                promote(self.staged, self.destination)
+        self.assertFalse((self.destination/'manifest.json').exists())
+        self.assertTrue((self.destination/'parsed.pkl').exists())
+
+        def check_manifest_last(src, dst):
+            if Path(dst).name == 'manifest.json':
+                self.assertFalse((self.destination/'parsed.pkl').exists())
+                self.assertFalse((self.destination/'fulltext.txt').exists())
+                self.assertTrue((self.destination/f'{DOC}.pkl').exists())
+                self.assertTrue((self.destination/f'{DOC}.txt').exists())
+            return original(src, dst)
+
+        with patch('src.sci_parse_worker.artifacts.os.replace', side_effect=check_manifest_last):
+            promote(self.staged, self.destination)
+        verify_run(self.destination, DOC, JOB, self.snapshot.sha256)
+        self.assertEqual({p.name for p in self.destination.iterdir()},
+                         {f'{DOC}.pkl', f'{DOC}.txt', 'manifest.json'})
+
+    def test_wrong_document_or_unrelated_entries_preserve_existing_manifest(self):
+        other = self.destination.with_name(JOB)
+        with self.assertRaisesRegex(ValueError, 'destination must match'):
+            promote(self.staged, other)
+        self.assertFalse(other.exists())
+        promote(self.staged, self.destination)
+        before = (self.destination/'manifest.json').read_bytes()
+        (self.destination/f'{JOB}.pkl').write_text('unrelated file')
+        with self.assertRaisesRegex(ValueError, 'unexpected entries'):
+            promote(self.staged, self.destination)
+        self.assertEqual((self.destination/'manifest.json').read_bytes(), before)
 
     def test_sci_finalizer_only_uses_independent_claim_and_receipt(self):
         with patch('src.sci_parse_worker.control.claim_result',return_value=self.claim), \

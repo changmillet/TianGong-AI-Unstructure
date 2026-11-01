@@ -12,8 +12,8 @@ checkPaths:
   - requirements.txt
   - src/**
   - docker/**
-lastReviewedAt: "2026-10-29"
-lastReviewedCommit: "0b223c8ec7ad183b0cd06d55a4e41fc4941aa852"
+lastReviewedAt: "2026-11-01"
+lastReviewedCommit: "b551c19864379cd3addd3b866c0f397f392952be"
 ---
 
 # Unstructure Development Runbook
@@ -328,8 +328,8 @@ bounded retries enqueue only `kb_sci_parse_queue`. Stale duplicate messages are
 archived without changing the current job. Finalizer DB/file failures retain
 its known parser task and retry receipt after a polling delay/lease expiry.
 
-Output is one directory per document UUID with parsed.pkl, fulltext.txt and
-manifest.json. Reprocessing clears KB readiness flags, not journals timestamps
+Output is one directory per existing SCI document UUID with `<document UUID>.pkl`,
+`<document UUID>.txt` and `manifest.json`; the manifest lists those exact filenames. Reprocessing clears KB readiness flags, not journals timestamps
 or existing remote search records. Hidden staging/publish directories can remain
 after SIGKILL; exclude them from document discovery. The future cloud stage must
 verify the database receipt as well as all file hashes; a manifest can exist
@@ -354,3 +354,12 @@ SCI status-request errors also obey the parser deadline; persistent 404/5xx
 become terminal instead of polling forever. Receipt lease changes release only
 a claim still owned by that worker. Reprocessing clears the old S3 manifest key
 as well as the local receipt and KB readiness flags; journals remains untouched.
+
+For the UUID-filename upgrade, first confirm SCI has no active jobs and save the
+single test document output outside the synchronized output tree. Upgrade only
+the two SCI PM2 apps from an isolated release, then explicitly reprocess that
+document. The finalizer replaces the known legacy aliases and publishes the new
+manifest last; it does not rename completed documents in bulk. Verify the current
+manifest hash against the KB receipt, journals row and legacy jobs/queues. Retain
+the prior release and backup for rollback; do not run the old finalizer against
+the new UUID-named artifacts.
