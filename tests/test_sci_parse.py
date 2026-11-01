@@ -32,15 +32,35 @@ class ArtifactTests(unittest.TestCase):
     def test_roundtrip_and_tampering(self):
         p = publish(self.root, DOC, RUN, "source", self.parsed, {"version":"test"})
         self.assertEqual(p, self.root / DOC)
-        self.assertEqual(set(x.name for x in p.iterdir()), {"parsed.pkl","fulltext.txt","manifest.json"})
-        self.assertEqual(pickle.loads((p/"parsed.pkl").read_bytes()), self.parsed.result)
-        self.assertEqual((p/"fulltext.txt").read_text(), self.parsed.txt)
-        self.assertEqual(verify_run(p,DOC,RUN,"source")["parsed_item_count"], 2)
+        self.assertEqual(set(x.name for x in p.iterdir()), {f"{DOC}.pkl",f"{DOC}.txt","manifest.json"})
+        self.assertEqual(pickle.loads((p/f"{DOC}.pkl").read_bytes()), self.parsed.result)
+        self.assertEqual((p/f"{DOC}.txt").read_text(), self.parsed.txt)
+        manifest = verify_run(p,DOC,RUN,"source")
+        self.assertEqual(manifest["parsed_item_count"], 2)
+        self.assertEqual(set(manifest["files"]), {f"{DOC}.pkl", f"{DOC}.txt"})
         with self.assertRaises(ValueError):
             verify_run(p,DOC,RUN,"another source")
-        (p/"fulltext.txt").write_text("tampered")
+        (p/f"{DOC}.txt").write_text("tampered")
         with self.assertRaises(ValueError):
             verify_run(p,DOC,RUN,"source")
+
+    def test_manifest_rejects_job_uuid_filenames(self):
+        p = publish(self.root, DOC, RUN, "source", self.parsed, {})
+        manifest = json.loads((p/'manifest.json').read_text())
+        for ext in ('pkl', 'txt'):
+            (p/f'{DOC}.{ext}').rename(p/f'{RUN}.{ext}')
+            manifest['files'][f'{RUN}.{ext}'] = manifest['files'].pop(f'{DOC}.{ext}')
+        (p/'manifest.json').write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, 'document UUID'):
+            verify_run(p, DOC, RUN, 'source')
+
+    def test_reference_text_is_preserved_in_uuid_artifacts(self):
+        parsed = ParsedDocument([{'text': 'References', 'type': 'title', 'page_number': 4},
+                                 {'text': 'Author, 2024. Journal reference.', 'page_number': 4}],
+                                'References\nAuthor, 2024. Journal reference.', 2, 0)
+        p = publish(self.root, DOC, RUN, 'source', parsed, {})
+        self.assertEqual(pickle.loads((p/f'{DOC}.pkl').read_bytes()), parsed.result)
+        self.assertEqual((p/f'{DOC}.txt').read_text(), parsed.txt)
 
     def test_vectors_and_empty_results_never_publish(self):
         for bad in [ParsedDocument([],"txt",0,0), ParsedDocument([{"text":"x"}],"",1,0),
@@ -105,7 +125,7 @@ class ArtifactTests(unittest.TestCase):
             self.assertFalse(raw_root.exists())
             self.assertEqual(main(args+['--execute']),0)
             register.assert_called_once();parse.assert_called_once();complete.assert_called_once()
-            self.assertEqual(pickle.loads((out/DOC/'parsed.pkl').read_bytes()),self.parsed.result)
+            self.assertEqual(pickle.loads((out/DOC/f'{DOC}.pkl').read_bytes()),self.parsed.result)
             self.assertTrue((raw_root/'sci_parse_probe'/f'{DOC}.pdf').is_symlink())
 
 

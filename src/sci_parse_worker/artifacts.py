@@ -29,6 +29,12 @@ def document_path(root: Path, document_id: str) -> Path:
     return root / str(UUID(document_id))
 
 
+def artifact_names(document_id: str) -> tuple[str, str]:
+    """Use the existing SCI document identity, never the processing job UUID."""
+    stem = str(UUID(document_id))
+    return f"{stem}.pkl", f"{stem}.txt"
+
+
 def reject_vectors(value: object) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
@@ -47,8 +53,8 @@ def verify_run(directory: Path, document_id: str, run_id: str, source_hash: str)
     if any(manifest.get(k) != v for k, v in expected.items()):
         raise ValueError("manifest identity mismatch")
     files = manifest.get("files", {})
-    if set(files) != {"parsed.pkl", "fulltext.txt"}:
-        raise ValueError("manifest must describe exactly parsed.pkl and fulltext.txt")
+    if set(files) != set(artifact_names(document_id)):
+        raise ValueError("manifest must describe the SCI document UUID .pkl and .txt files")
     for name, info in files.items():
         path = directory / name
         if path.is_symlink() or not path.is_file():
@@ -71,14 +77,15 @@ def publish(root: Path, document_id: str, run_id: str, source_hash: str,
            or not x["text"].strip() for x in parsed.result):
         raise ValueError("every parsed item must contain nonempty text")
     reject_vectors(parsed.result)
+    pkl_name, txt_name = artifact_names(document_id)
     destination.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".staging-", dir=destination.parent))
     try:
-        with (staging / "parsed.pkl").open("wb") as stream:
+        with (staging / pkl_name).open("wb") as stream:
             pickle.dump(parsed.result, stream, protocol=4)
             stream.flush()
             os.fsync(stream.fileno())
-        with (staging / "fulltext.txt").open("w", encoding="utf-8") as stream:
+        with (staging / txt_name).open("w", encoding="utf-8") as stream:
             stream.write(parsed.txt)
             stream.flush()
             os.fsync(stream.fileno())
@@ -90,7 +97,7 @@ def publish(root: Path, document_id: str, run_id: str, source_hash: str,
             "dropped_empty_text_count": parsed.dropped_empty_text_count,
             "files": {name: {"size_bytes": (staging / name).stat().st_size,
                               "sha256": digest(staging / name)}
-                      for name in ("parsed.pkl", "fulltext.txt")},
+                      for name in (pkl_name, txt_name)},
         }
         if document_version is not None:
             manifest["document_version"] = document_version
@@ -109,7 +116,7 @@ def publish(root: Path, document_id: str, run_id: str, source_hash: str,
 
 
 def promote(staged: Path, destination: Path) -> None:
-    """Publish fixed names while the caller holds the document/job DB locks.
+    """Publish document UUID names under the caller's document/job DB locks.
 
     Filesystem and DB commit are not atomic. No manifest means not ready; an
     interrupted replacement is repaired by replaying this job. Cloud readers
@@ -117,15 +124,29 @@ def promote(staged: Path, destination: Path) -> None:
     """
     if destination.is_symlink():
         raise ValueError("SCI destination cannot be a symlink")
+    manifest = json.loads((staged / "manifest.json").read_text())
+    document_id = manifest["document_id"]
+    if destination.name != str(UUID(document_id)):
+        raise ValueError("SCI destination must match the manifest document UUID")
+    verify_run(staged, document_id, manifest["run_id"], manifest["source_sha256"])
+    names = artifact_names(document_id)
+    legacy_names = ("parsed.pkl", "fulltext.txt")
     destination.mkdir(parents=True, exist_ok=True)
-    if any(p.name not in {"parsed.pkl", "fulltext.txt", "manifest.json"}
+    if any(p.name not in {*names, *legacy_names, "manifest.json"}
            or p.is_symlink() or not p.is_file() for p in destination.iterdir()):
         raise ValueError("SCI destination has unexpected entries; inspect before replacing")
     (destination / "manifest.json").unlink(missing_ok=True)
     # Staging is on the same filesystem: hard links avoid copying large files
     # while the DB locks block heartbeats. The staged bytes remain for retries.
     with tempfile.TemporaryDirectory(prefix=".publish-", dir=destination.parent) as scratch:
-        for name in ("parsed.pkl", "fulltext.txt", "manifest.json"):
+        for name in names:
             temp = Path(scratch) / name
             os.link(staged / name, temp)
             os.replace(temp, destination / name)
+        # A retry may see a mix of old/new names after a crash. Retire only the
+        # two known SCI aliases, before making the new manifest visible.
+        for name in legacy_names:
+            (destination / name).unlink(missing_ok=True)
+        temp = Path(scratch) / "manifest.json"
+        os.link(staged / "manifest.json", temp)
+        os.replace(temp, destination / "manifest.json")

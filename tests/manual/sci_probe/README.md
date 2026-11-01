@@ -28,7 +28,7 @@ Registration calls the existing enqueue RPC and reserves **only this job's**
 message with real conditional `pgmq.read` before committing; other messages
 are not consumed. The existing Worker claims that message and maintains its
 lease. `max_attempts=1` bounds failures without automatic retries. Successful
-parser output becomes `parsed.pkl` (no vector fields), `fulltext.txt`, and
+parser output becomes `<SCI UUID>.pkl` (no vector fields), `<SCI UUID>.txt`, and
 `manifest.json` directly under `UUID/`. The run ID remains in the manifest and
 job receipt for correlation; it does not create a second directory or retain
 historical output versions. Manifest identity, sizes and SHA256 are

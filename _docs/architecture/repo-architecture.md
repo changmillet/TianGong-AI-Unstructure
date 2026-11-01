@@ -11,8 +11,8 @@ checkPaths:
   - src/**
   - docker/**
   - requirements.txt
-lastReviewedAt: "2026-10-29"
-lastReviewedCommit: "0b223c8ec7ad183b0cd06d55a4e41fc4941aa852"
+lastReviewedAt: "2026-11-01"
+lastReviewedCommit: "b551c19864379cd3addd3b866c0f397f392952be"
 ---
 
 # Unstructure Architecture
@@ -124,16 +124,26 @@ An explicit reprocess accepts only compatible SCI/manual-probe documents with
 no active legacy job, and clears current KB parse/index readiness. Historical
 search data itself is not deleted by registration.
 
-The receiver writes `NAS_RAW_ROOT/processed/sci/<document UUID>/parsed.pkl`,
-`fulltext.txt` and `manifest.json`. There is no run UUID directory and no local
+The receiver writes `NAS_RAW_ROOT/processed/sci/<document UUID>/<document UUID>.pkl`,
+`<document UUID>.txt` and `manifest.json`. There is no run UUID directory and no local
 embedding/chunk splitting. The job UUID remains in the manifest for correlation.
 The receiver verifies current document/task/version/hash/lease under row locks,
 then records `parsed_local` and a succeeded private SCI job. It does not enqueue
 legacy S3/index jobs or change SCI upload, embedding or fulltext times.
 
-Fixed filenames are prepared in staging and published using hard links/renames,
+Document UUID filenames are prepared in staging and published using hard links/renames,
 manifest last. Filesystem publication and database commit are not atomic. The
 future AWS consumer must check both payload hashes and the committed current
 document manifest hash/version/source and succeeded **private SCI job** before
 processing. A complete file set alone is not a completed receipt. NAS-to-S3
 verification, Lambda/OpenAI embedding and indexing are not implemented here.
+
+The manifest file list names the same document UUID artifacts. During an explicit
+SCI reprocess, only the prior `parsed.pkl` / `fulltext.txt` aliases are retired
+before the new manifest is published. Mixed old/new names after interruption can
+be retried; unexpected files, symlinks or a different document directory stop
+publication. Previously completed documents are not swept or renamed on startup.
+
+The shared two-stage service may run additional vision work for eligible images.
+No local embedding does not mean no visual enhancement. The SCI worker preserves
+returned reference text; naming changes do not change parser policy.

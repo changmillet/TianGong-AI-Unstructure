@@ -687,3 +687,19 @@ Claude独立复核发现140状态查询持续异常时缺少截止、租约变�
 复用4页文档2e03c71a-0429-4706-990e-44af753d2c1b验证：新独立任务ab1d4c02-2db1-454e-b490-263a579cf336、SCI消息2、140任务7130e318-9e64-4be2-b133-41753e3593ed。20:02:57提交、20:03:22完成，一次成功无重试。单层processed/sci/<文档UUID>/恰有三个文件，64项纯解析结果、全文31490字符，无向量；文件hash与数据库manifest回执匹配，kb_documents为parsed_local。
 
 journals全行hash9458610bb27a0a88d30e9fe719ebdb87保持不变，原PDFhash不变，旧任务和四个旧队列不变。49项本机测试（含8项真实SQL/PGMQ）通过；配套数据库81项离线、26项SQL以及完整本地/官方预览通过。证据analysis/sci_changes_20261029/sci_parse_probe_47/independent-workers/REPORT.md。PM2配置已保存，未安装OS开机启动；仅验证这一篇，不启动全量。NAS同步/S3/AWS/OpenAI/双库写入仍未实现，PIPE-06整体不关闭。
+
+
+### 2026-11-01 PIPE-06：SCI 产物改为已有文档 UUID 命名（开始）
+
+用户授权本机开发后部署142单篇测试，关联unstructure#49。范围为SCI的<文档UUID>.pkl、<文档UUID>.txt与manifest文件清单；单层文档目录，旧humanities代码与进程不动。处理旧固定文件名的单篇替换与中断重试，不批量迁移。验收为文件名/内容/hash/数据库回执一致、journals与旧队列不变；遇到活动SCI任务或不明目录条目停止升级。解析模式仅核查，不随本次命名修改切换。
+
+已读取用户分享会话，历史建议为新增PDF默认纯解析、图表按需增强。142旧测试pickle实查64项，含References标题及参考文献正文；这与是否额外视觉增强是独立问题。Claude App提示无法连接api.deepseek.com，独立评审不可用。
+
+
+### 2026-11-01 PIPE-06：SCI UUID 文件名升级验收通过
+
+本机44fdf58已部署142独立release；两个SCI PM2进程online，humanities原代码/进程未变。复用4页PDF，SCI任务668ca402-e395-434e-b741-fbe602c93396、140任务6bb62929-8dc4-4c97-a14d-c57c260f86f9一次完成，64项、全文31436字符。单层目录中仅<SCI文档UUID>.pkl、<SCI文档UUID>.txt、manifest.json；旧固定名已替换。manifest三方（文件、清单、KB回执）校验通过，原PDF、journals整行、旧kb_jobs/四队列不变。旧release与单篇产物有校验备份；不批量迁移。
+
+本机53项测试中45通过、8项可选隔离SQL本轮未跑；142运行环境21项通过，docpact通过。证据analysis/sci_changes_20261101/uuid_artifacts_49/REPORT.md，交付unstructure#49/PR50。
+
+术语勘误：此前“纯解析”仅能证明本地不做Embedding，不能理解为关闭视觉增强。140当前two_stage会按符合条件的图片派发vision；用户分享会话中的“默认纯解析、按需增强”建议尚未应用到这个Worker。本轮仅命名修改，未改解析策略。旧与新PKL均实查含References标题及正文，但未结构化引用关系或验收所有引用完整性。
