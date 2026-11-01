@@ -12,7 +12,7 @@ checkPaths:
   - docker/**
   - requirements.txt
 lastReviewedAt: "2026-11-01"
-lastReviewedCommit: "b551c19864379cd3addd3b866c0f397f392952be"
+lastReviewedCommit: "7d79fcb8d580de3d23f52d1d83f5ca518567c723"
 ---
 
 # Unstructure Architecture
@@ -147,3 +147,9 @@ publication. Previously completed documents are not swept or renamed on startup.
 The shared two-stage service may run additional vision work for eligible images.
 No local embedding does not mean no visual enhancement. The SCI worker preserves
 returned reference text; naming changes do not change parser policy.
+
+SCI submitter no-claim polling backs off from 30 seconds to 60 seconds after
+three consecutive idle checks. Work, capacity backpressure and exceptions reset
+the idle streak; the existing active delay is retained. The finalizer continues
+its own configured interval (5 seconds on 142), so idle submission polling does
+not delay collection of running parser results. No extra queue/table is needed.
